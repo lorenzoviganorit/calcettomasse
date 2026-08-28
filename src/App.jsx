@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   ShieldCheck, Trophy, Users, Settings, ArrowLeftRight, Star, Flame, Anchor,
-  AlertTriangle, X, LogOut, Plus, KeyRound, UserPlus,
+  AlertTriangle, X, LogOut, Plus, KeyRound, UserPlus, ChevronDown,
 } from "lucide-react";
 
 // ------------------------------------------------------------------
@@ -123,6 +123,20 @@ function SearchableSelect({ options, value, onChange, placeholder }) {
   );
 }
 
+// Sezione richiudibile — usata in Admin per Titolari / Riserve / Anagrafica
+function Collassabile({ titolo, defaultAperto = true, children }) {
+  const [aperto, setAperto] = useState(defaultAperto);
+  return (
+    <div>
+      <button onClick={() => setAperto((v) => !v)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: "none", border: "none", cursor: "pointer", padding: 0, marginBottom: aperto ? 8 : 0 }}>
+        <span className="disp" style={{ fontSize: 13, color: C.mutedFaint }}>{titolo}</span>
+        <ChevronDown size={16} color={C.mutedFaint} style={{ transform: aperto ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+      </button>
+      {aperto && children}
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------
 export default function App() {
   const [tab, setTab] = useState("home");
@@ -132,6 +146,7 @@ export default function App() {
   const [giocatori, setGiocatori] = useState([]);
   const [partita, setPartita] = useState(null);
   const [prenotazioni, setPrenotazioni] = useState([]);
+  const [storico, setStorico] = useState([]);
   const [currentUserId, setCurrentUserId] = useState(() => localStorage.getItem(LOCAL_KEY) || null);
   const [showProfile, setShowProfile] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -140,10 +155,11 @@ export default function App() {
   const fetchAll = useCallback(async () => {
     try {
       setError(null);
-      const [sq, gio, part] = await Promise.all([
+      const [sq, gio, part, storicoData] = await Promise.all([
         sb("squadre?select=*"),
         sb("giocatori?select=*"),
         sb("partite?select=*&stato=eq.aperta&order=data_partita.asc&limit=1"),
+        sb("partite?select=*&stato=in.(giocata,conclusa)&order=data_partita.desc&limit=50"),
       ]);
       let pren = [];
       if (part[0]) {
@@ -155,6 +171,7 @@ export default function App() {
       setGiocatori(gio);
       setPartita(part[0] || null);
       setPrenotazioni(pren);
+      setStorico(storicoData);
     } catch (e) {
       setError(e.message);
     }
@@ -275,6 +292,23 @@ export default function App() {
       });
     });
 
+  // Titolari di una partita passata + eventuale voto MVP già espresso da chi è loggato
+  const caricaDettaglioPartita = useCallback(async (idPartita) => {
+    const righe = await sb(`giocatori_partite?select=*,giocatori(*)&id_partita=eq.${idPartita}&flag_annullamento=eq.false&order=data_prenotazione.asc`);
+    const titolari = righe.slice(0, 14).filter((r) => r.id_giocatore); // solo giocatori veri, non ospiti
+    const mioVoto = await sb(`voti_mvp?select=*&id_partita=eq.${idPartita}&id_votante=eq.${currentUser.id}`);
+    return { titolari, mioVoto: mioVoto[0] || null };
+  }, [currentUser]);
+
+  const votaMvp = (idPartita, idGiocatore, idVotoEsistente) =>
+    withBusy(async () => {
+      if (idVotoEsistente) {
+        await sbWrite(`voti_mvp?id=eq.${idVotoEsistente}`, "PATCH", { id_giocatore: idGiocatore });
+      } else {
+        await sbWrite("voti_mvp", "POST", { id_votante: currentUser.id, id_giocatore: idGiocatore, id_partita: idPartita });
+      }
+    });
+
   const salvaProfilo = (nome, soprannome) =>
     withBusy(async () => {
       await sbWrite(`giocatori?id=eq.${currentUser.id}`, "PATCH", { nome, soprannome });
@@ -349,7 +383,13 @@ export default function App() {
                   chiudiPartita={chiudiPartita}
                 />
               )}
-              {tab === "stats" && <StatsTab />}
+              {tab === "stats" && (
+                <StatsTab
+                  squadre={squadre} colorePerSquadra={colorePerSquadra} storico={storico}
+                  currentUser={currentUser} busy={busy}
+                  caricaDettaglioPartita={caricaDettaglioPartita} votaMvp={votaMvp}
+                />
+              )}
               {tab === "admin" && (
                 <AdminTab
                   giocatori={giocatori} squadre={squadre} colorePerSquadra={colorePerSquadra}
@@ -751,23 +791,75 @@ function ColonnePerSquadra({ squadre, colorePerSquadra, prenotazioni, titolariId
   );
 }
 
-function StatsTab() {
+const LOGO_SQUADRA = {
+  "Zincadoria": "/logos/zincadoria.png",
+  "QT8": "/logos/qt8.png",
+};
+
+function StatsTab({ squadre, colorePerSquadra, storico, currentUser, busy, caricaDettaglioPartita, votaMvp }) {
+  const [mostraTutti, setMostraTutti] = useState(false);
+  const [partitaAperta, setPartitaAperta] = useState(null); // riga di `storico` selezionata
+
+  const vittorie = useMemo(() => {
+    const conteggio = {};
+    squadre.forEach((s) => (conteggio[s.id] = 0));
+    storico.forEach((p) => {
+      if (p.gol_squadra_1 == null || p.gol_squadra_2 == null) return;
+      if (p.gol_squadra_1 > p.gol_squadra_2) conteggio[p.id_squadra_1] = (conteggio[p.id_squadra_1] || 0) + 1;
+      else if (p.gol_squadra_2 > p.gol_squadra_1) conteggio[p.id_squadra_2] = (conteggio[p.id_squadra_2] || 0) + 1;
+    });
+    return conteggio;
+  }, [storico, squadre]);
+
+  const daMostrare = mostraTutti ? storico : storico.slice(0, 3);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      <div style={{ fontSize: 12, color: C.mutedFaint, fontStyle: "italic" }}>
-        Dati di esempio — qui compariranno lo storico e i badge reali non appena ci saranno partite giocate.
+      <div style={{ background: C.surface, borderRadius: 14, padding: "20px 16px", border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "space-around" }}>
+        {squadre.map((sq) => (
+          <div key={sq.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+            {LOGO_SQUADRA[sq.nome] ? (
+              <img src={LOGO_SQUADRA[sq.nome]} alt={sq.nome} style={{ width: 56, height: 56, objectFit: "contain" }} />
+            ) : (
+              <div style={{ width: 56, height: 56, borderRadius: "50%", background: colorePerSquadra[sq.id] }} />
+            )}
+            <div className="num" style={{ fontSize: 32, lineHeight: 1 }}>{vittorie[sq.id] || 0}</div>
+            <div className="disp" style={{ fontSize: 11, color: colorePerSquadra[sq.id] }}>{sq.nome}</div>
+          </div>
+        ))}
       </div>
+
       <div>
         <div className="disp" style={{ fontSize: 13, color: C.mutedFaint, marginBottom: 8 }}>Ultimi risultati</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {STORICO_ESEMPIO.map((s, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}` }}>
-              <span style={{ fontSize: 12, color: C.mutedFaint }}>{s.data}</span>
-              <span className="num" style={{ fontSize: 16 }}>{s.golA} — {s.golB}</span>
+        {storico.length === 0 ? (
+          <div style={{ fontSize: 13, color: C.mutedFaint }}>Nessuna partita giocata ancora.</div>
+        ) : (
+          <>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {daMostrare.map((p) => {
+                const sq1 = squadre.find((s) => s.id === p.id_squadra_1);
+                const sq2 = squadre.find((s) => s.id === p.id_squadra_2);
+                return (
+                  <button key={p.id} onClick={() => setPartitaAperta(p)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}`, cursor: "pointer", textAlign: "left" }}>
+                    <span style={{ fontSize: 12, color: C.mutedFaint }}>{new Date(p.data_partita).toLocaleDateString("it-IT", { day: "numeric", month: "short" })}</span>
+                    <span className="num" style={{ fontSize: 15 }}>
+                      <span style={{ color: sq1 ? colorePerSquadra[sq1.id] : C.chalk }}>{p.gol_squadra_1}</span>
+                      {" — "}
+                      <span style={{ color: sq2 ? colorePerSquadra[sq2.id] : C.chalk }}>{p.gol_squadra_2}</span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          ))}
-        </div>
+            {storico.length > 3 && (
+              <button onClick={() => setMostraTutti((v) => !v)} className="disp" style={{ marginTop: 8, padding: "9px 0", width: "100%", borderRadius: 8, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted, fontSize: 11 }}>
+                {mostraTutti ? "Mostra meno" : "Vedi tutti"}
+              </button>
+            )}
+          </>
+        )}
       </div>
+
       <div>
         <div className="disp" style={{ fontSize: 13, color: C.mutedFaint, marginBottom: 8 }}>Badge</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -782,6 +874,93 @@ function StatsTab() {
             );
           })}
         </div>
+        <div style={{ fontSize: 11, color: C.mutedFaint, fontStyle: "italic", marginTop: 8 }}>Ancora di esempio — li calcoleremo dai dati reali più avanti.</div>
+      </div>
+
+      {partitaAperta && (
+        <DettaglioPartitaModal
+          partita={partitaAperta} squadre={squadre} colorePerSquadra={colorePerSquadra}
+          currentUser={currentUser} busy={busy}
+          caricaDettaglioPartita={caricaDettaglioPartita} votaMvp={votaMvp}
+          onClose={() => setPartitaAperta(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function DettaglioPartitaModal({ partita, squadre, colorePerSquadra, currentUser, busy, caricaDettaglioPartita, votaMvp, onClose }) {
+  const [titolari, setTitolari] = useState(null);
+  const [mioVoto, setMioVoto] = useState(null);
+  const [votando, setVotando] = useState(false);
+
+  const ricarica = useCallback(async () => {
+    const { titolari: t, mioVoto: v } = await caricaDettaglioPartita(partita.id);
+    setTitolari(t);
+    setMioVoto(v);
+  }, [caricaDettaglioPartita, partita.id]);
+
+  useEffect(() => { ricarica(); }, [ricarica]);
+
+  const sq1 = squadre.find((s) => s.id === partita.id_squadra_1);
+  const sq2 = squadre.find((s) => s.id === partita.id_squadra_2);
+
+  const scegli = async (idGiocatore) => {
+    await votaMvp(partita.id, idGiocatore, mioVoto?.id);
+    await ricarica();
+    setVotando(false);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 50 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, maxHeight: "85vh", overflowY: "auto", background: C.surface, borderRadius: "16px 16px 0 0", padding: 20, border: `1px solid ${C.line}`, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="disp" style={{ fontSize: 16 }}>{new Date(partita.data_partita).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" })}</div>
+          <button onClick={onClose} aria-label="Chiudi" style={{ background: "none", border: "none", color: C.mutedFaint, cursor: "pointer" }}><X size={20} /></button>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 16 }}>
+          <span className="disp" style={{ color: sq1 ? colorePerSquadra[sq1.id] : C.chalk, fontSize: 13 }}>{sq1?.nome}</span>
+          <span className="num" style={{ fontSize: 26 }}>{partita.gol_squadra_1} — {partita.gol_squadra_2}</span>
+          <span className="disp" style={{ color: sq2 ? colorePerSquadra[sq2.id] : C.chalk, fontSize: 13 }}>{sq2?.nome}</span>
+        </div>
+
+        {titolari === null ? (
+          <div style={{ fontSize: 13, color: C.mutedFaint, textAlign: "center" }}>Carico i giocatori…</div>
+        ) : (
+          <>
+            {mioVoto && !votando && (
+              <div style={{ fontSize: 12, color: C.flood, textAlign: "center" }}>
+                Hai votato: {titolari.find((t) => t.id_giocatore === mioVoto.id_giocatore)?.giocatori?.soprannome || "—"}
+              </div>
+            )}
+
+            {!votando ? (
+              <button onClick={() => setVotando(true)} className="disp" style={{ padding: "13px 0", borderRadius: 10, border: "none", cursor: "pointer", background: C.flood, color: "#12200F" }}>
+                {mioVoto ? "Cambia voto MVP" : "Vota MVP"}
+              </button>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {[...titolari].sort((a, b) => (a.giocatori.soprannome || a.giocatori.nome).localeCompare(b.giocatori.soprannome || b.giocatori.nome)).map((t) => {
+                  const selezionato = mioVoto?.id_giocatore === t.id_giocatore;
+                  return (
+                    <button key={t.id} disabled={busy} onClick={() => scegli(t.id_giocatore)} style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", borderRadius: 10, cursor: "pointer",
+                      background: selezionato ? C.surface2 : "transparent", border: `1px solid ${selezionato ? C.flood : C.line}`, color: C.chalk,
+                    }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: colorePerSquadra[t.id_squadra] }} />
+                        {t.giocatori.soprannome || t.giocatori.nome}
+                      </span>
+                      {selezionato && <span style={{ color: C.flood }}>✓</span>}
+                    </button>
+                  );
+                })}
+                <button onClick={() => setVotando(false)} className="disp" style={{ marginTop: 4, padding: "9px 0", borderRadius: 8, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted, fontSize: 11 }}>Annulla</button>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
@@ -875,8 +1054,7 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
 
       {actionError && <div style={{ fontSize: 12, color: C.danger }}>Errore ({actionError}) — controlla le policy INSERT/UPDATE su giocatori_partite.</div>}
 
-      <div>
-        <div className="disp" style={{ fontSize: 13, color: C.mutedFaint, marginBottom: 8 }}>Titolari ({titolari.length}/14)</div>
+      <Collassabile titolo={`Titolari (${titolari.length}/14)`}>
         {titolari.length === 0 && <div style={{ fontSize: 12, color: C.mutedFaint }}>Nessuno ancora.</div>}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {titolari.map((p) => {
@@ -906,10 +1084,9 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
             );
           })}
         </div>
-      </div>
+      </Collassabile>
 
-      <div>
-        <div className="disp" style={{ fontSize: 13, color: C.mutedFaint, marginBottom: 8 }}>Riserve ({riserve.length})</div>
+      <Collassabile titolo={`Riserve (${riserve.length})`}>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {riserve.map((p, idx) => (
             <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "transparent", borderRadius: 10, border: `1px dashed ${C.line}` }}>
@@ -923,7 +1100,7 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
             </div>
           ))}
         </div>
-      </div>
+      </Collassabile>
 
       <AnagraficaLista giocatori={giocatori} colorePerSquadra={colorePerSquadra} />
 
@@ -939,8 +1116,7 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
 function AnagraficaLista({ giocatori, colorePerSquadra }) {
   const ordinati = useMemo(() => [...giocatori].sort((a, b) => (a.soprannome || a.nome).localeCompare(b.soprannome || b.nome)), [giocatori]);
   return (
-    <div>
-      <div className="disp" style={{ fontSize: 13, color: C.mutedFaint, marginBottom: 8 }}>Anagrafica giocatori ({ordinati.length})</div>
+    <Collassabile titolo={`Anagrafica giocatori (${ordinati.length})`} defaultAperto={false}>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {ordinati.map((g) => (
           <div key={g.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}` }}>
@@ -952,6 +1128,6 @@ function AnagraficaLista({ giocatori, colorePerSquadra }) {
           </div>
         ))}
       </div>
-    </div>
+    </Collassabile>
   );
 }
