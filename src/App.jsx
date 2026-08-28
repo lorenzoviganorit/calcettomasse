@@ -232,7 +232,14 @@ export default function App() {
 
   const rimuoviPresenza = (prenotazioneId) =>
     withBusy(async () => {
-      await sbWrite(`giocatori_partite?id=eq.${prenotazioneId}`, "PATCH", { flag_annullamento: true });
+      const riga = prenotazioni.find((p) => p.id === prenotazioneId);
+      if (riga && !riga.id_giocatore) {
+        // ospite: nessun account dietro, si può cancellare la riga per intero
+        await sbWrite(`giocatori_partite?id=eq.${prenotazioneId}`, "DELETE");
+      } else {
+        // giocatore vero: si annulla mantenendo lo storico
+        await sbWrite(`giocatori_partite?id=eq.${prenotazioneId}`, "PATCH", { flag_annullamento: true });
+      }
     });
 
   const portaOspite = (nomeOspite, idSquadra) =>
@@ -342,7 +349,7 @@ export default function App() {
 
         {currentUser && (
           <div style={{ position: "sticky", bottom: 0, display: "flex", background: C.surface, borderTop: `1px solid ${C.line}` }}>
-            {TABS.map((t) => {
+            {TABS.filter((t) => t.id !== "admin" || currentUser.is_admin).map((t) => {
               const Icon = t.icon;
               const active = tab === t.id;
               return (
