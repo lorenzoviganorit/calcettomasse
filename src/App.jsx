@@ -341,12 +341,20 @@ export default function App() {
         <div style={{ padding: "28px 20px 16px", background: `radial-gradient(120% 100% at 50% 0%, ${C.surface2} 0%, ${C.bg} 70%)`, borderBottom: `1px solid ${C.line}`, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
             <div className="disp" style={{ fontSize: 12, color: C.mutedFaint, letterSpacing: "0.12em" }}>DATI REALI · SUPABASE</div>
-            <div className="disp" style={{ fontSize: 26, marginTop: 2 }}>
-              {partita ? "Prossima partita" : loading ? "Carico..." : "Nessuna partita aperta"}
-            </div>
-            <div style={{ fontSize: 14, color: C.muted, marginTop: 2 }}>
-              {partita ? new Date(partita.data_partita).toLocaleDateString("it-IT", { day: "numeric", month: "long" }) : "\u00A0"}
-            </div>
+            {tab === "home" ? (
+              <>
+                <div className="disp" style={{ fontSize: 26, marginTop: 2 }}>
+                  {partita ? "Prossima partita" : loading ? "Carico..." : "Nessuna partita aperta"}
+                </div>
+                <div style={{ fontSize: 14, color: C.muted, marginTop: 2 }}>
+                  {partita ? new Date(partita.data_partita).toLocaleDateString("it-IT", { day: "numeric", month: "long" }) : "\u00A0"}
+                </div>
+              </>
+            ) : (
+              <div className="disp" style={{ fontSize: 26, marginTop: 2 }}>
+                {tab === "stats" ? "Statistiche" : "Admin"}
+              </div>
+            )}
           </div>
           {currentUser && (
             <button onClick={() => setShowProfile(true)} aria-label="Profilo" style={{
@@ -974,7 +982,7 @@ function NuovoGiocatoreForm({ squadre, busy, onCrea }) {
   const [ruolo, setRuolo] = useState("CEN");
   const [forza, setForza] = useState(6);
   const [idSquadra, setIdSquadra] = useState(squadre[0]?.id || "");
-  const [pin, setPin] = useState(() => String(Math.floor(1000 + Math.random() * 9000)));
+  const pin = "1234";
   const [err, setErr] = useState(null);
   const [ok, setOk] = useState(false);
 
@@ -992,7 +1000,6 @@ function NuovoGiocatoreForm({ squadre, busy, onCrea }) {
       });
       setOk(true);
       setNome(""); setSoprannome(""); setTelefono("");
-      setPin(String(Math.floor(1000 + Math.random() * 9000)));
       setTimeout(() => setOk(false), 2000);
     } catch (e2) {
       setErr(e2.message);
@@ -1048,57 +1055,61 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <button style={{ padding: "14px 0", borderRadius: 12, border: "none", cursor: "pointer", background: C.surface2, color: C.chalk, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} className="disp">
-        <ShieldCheck size={18} /> Suggerisci formazione
-      </button>
-
       {actionError && <div style={{ fontSize: 12, color: C.danger }}>Errore ({actionError}) — controlla le policy INSERT/UPDATE su giocatori_partite.</div>}
 
-      <Collassabile titolo={`Titolari (${titolari.length}/14)`}>
-        {titolari.length === 0 && <div style={{ fontSize: 12, color: C.mutedFaint }}>Nessuno ancora.</div>}
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {titolari.map((p) => {
-            const g = p.giocatori;
-            const ospite = !g;
-            const altraSquadra = squadre.find((s) => s.id !== p.id_squadra);
-            return (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: C.surface, borderRadius: 10, border: ospite ? `1px dashed ${C.line}` : `1px solid ${C.line}` }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: colorePerSquadra[p.id_squadra] }} />
-                  <span style={{ fontSize: 14 }}>
-                    {ospite ? p.nome_ospite : (g?.soprannome || g?.nome)}{" "}
-                    <span style={{ color: C.mutedFaint, fontSize: 11 }}>{ospite ? "(ospite)" : `(${g?.ruolo} · ${g?.forza})`}</span>
-                  </span>
-                </div>
-                <div style={{ display: "flex", gap: 10 }}>
-                  {altraSquadra && (
-                    <button disabled={busy} onClick={() => spostaSquadra(p.id, altraSquadra.id)} aria-label="Sposta squadra" style={{ background: "none", border: "none", cursor: "pointer", color: C.mutedFaint, padding: 4 }}>
-                      <ArrowLeftRight size={16} />
-                    </button>
-                  )}
-                  <button disabled={busy} onClick={() => rimuoviPresenza(p.id)} aria-label="Rimuovi presenza" style={{ background: "none", border: "none", cursor: "pointer", color: C.mutedFaint, padding: 4 }}>
-                    <X size={16} />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Collassabile>
+      <Collassabile titolo="Gestisci Prossima Partita">
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <button style={{ padding: "14px 0", borderRadius: 12, border: "none", cursor: "pointer", background: C.surface2, color: C.chalk, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} className="disp">
+            <ShieldCheck size={18} /> Suggerisci formazione
+          </button>
 
-      <Collassabile titolo={`Riserve (${riserve.length})`}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {riserve.map((p, idx) => (
-            <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "transparent", borderRadius: 10, border: `1px dashed ${C.line}` }}>
-              <span style={{ fontSize: 13, color: C.muted }}>{p.giocatori ? (p.giocatori.soprannome || p.giocatori.nome) : `${p.nome_ospite} (ospite)`}</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span className="disp" style={{ fontSize: 10, color: C.mutedFaint }}>{idx + 1}ª riserva</span>
-                <button disabled={busy} onClick={() => rimuoviPresenza(p.id)} aria-label="Rimuovi presenza" style={{ background: "none", border: "none", cursor: "pointer", color: C.mutedFaint, padding: 4 }}>
-                  <X size={14} />
-                </button>
-              </div>
+          <Collassabile titolo={`Titolari (${titolari.length}/14)`}>
+            {titolari.length === 0 && <div style={{ fontSize: 12, color: C.mutedFaint }}>Nessuno ancora.</div>}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {titolari.map((p) => {
+                const g = p.giocatori;
+                const ospite = !g;
+                const altraSquadra = squadre.find((s) => s.id !== p.id_squadra);
+                return (
+                  <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: C.surface, borderRadius: 10, border: ospite ? `1px dashed ${C.line}` : `1px solid ${C.line}` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: colorePerSquadra[p.id_squadra] }} />
+                      <span style={{ fontSize: 14 }}>
+                        {ospite ? p.nome_ospite : (g?.soprannome || g?.nome)}{" "}
+                        <span style={{ color: C.mutedFaint, fontSize: 11 }}>{ospite ? "(ospite)" : `(${g?.ruolo} · ${g?.forza})`}</span>
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      {altraSquadra && (
+                        <button disabled={busy} onClick={() => spostaSquadra(p.id, altraSquadra.id)} aria-label="Sposta squadra" style={{ background: "none", border: "none", cursor: "pointer", color: C.mutedFaint, padding: 4 }}>
+                          <ArrowLeftRight size={16} />
+                        </button>
+                      )}
+                      <button disabled={busy} onClick={() => rimuoviPresenza(p.id)} aria-label="Rimuovi presenza" style={{ background: "none", border: "none", cursor: "pointer", color: C.mutedFaint, padding: 4 }}>
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ))}
+          </Collassabile>
+
+          <Collassabile titolo={`Riserve (${riserve.length})`}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {riserve.map((p, idx) => (
+                <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "transparent", borderRadius: 10, border: `1px dashed ${C.line}` }}>
+                  <span style={{ fontSize: 13, color: C.muted }}>{p.giocatori ? (p.giocatori.soprannome || p.giocatori.nome) : `${p.nome_ospite} (ospite)`}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span className="disp" style={{ fontSize: 10, color: C.mutedFaint }}>{idx + 1}ª riserva</span>
+                    <button disabled={busy} onClick={() => rimuoviPresenza(p.id)} aria-label="Rimuovi presenza" style={{ background: "none", border: "none", cursor: "pointer", color: C.mutedFaint, padding: 4 }}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Collassabile>
         </div>
       </Collassabile>
 
@@ -1116,7 +1127,7 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
 function AnagraficaLista({ giocatori, colorePerSquadra }) {
   const ordinati = useMemo(() => [...giocatori].sort((a, b) => (a.soprannome || a.nome).localeCompare(b.soprannome || b.nome)), [giocatori]);
   return (
-    <Collassabile titolo={`Anagrafica giocatori (${ordinati.length})`} defaultAperto={false}>
+    <Collassabile titolo={`Anagrafica Giocatori (${ordinati.length})`} defaultAperto={false}>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {ordinati.map((g) => (
           <div key={g.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}` }}>
