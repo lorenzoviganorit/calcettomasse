@@ -171,9 +171,9 @@ export default function App() {
     return map;
   }, [squadre]);
 
-  const titolariIds = useMemo(() => new Set(prenotazioni.slice(0, 14).map((p) => p.id_giocatore)), [prenotazioni]);
+  const titolariIds = useMemo(() => new Set(prenotazioni.slice(0, 14).map((p) => p.id)), [prenotazioni]);
   const contaTitolari = (idSquadra) =>
-    prenotazioni.filter((p) => p.id_squadra === idSquadra && titolariIds.has(p.id_giocatore)).length;
+    prenotazioni.filter((p) => p.id_squadra === idSquadra && titolariIds.has(p.id)).length;
 
   const currentUser = giocatori.find((g) => String(g.id) === String(currentUserId)) || null;
 
@@ -233,6 +233,19 @@ export default function App() {
   const rimuoviPresenza = (prenotazioneId) =>
     withBusy(async () => {
       await sbWrite(`giocatori_partite?id=eq.${prenotazioneId}`, "PATCH", { flag_annullamento: true });
+    });
+
+  const portaOspite = (nomeOspite, idSquadra) =>
+    withBusy(async () => {
+      await sbWrite("giocatori_partite", "POST", {
+        id_giocatore: null,
+        nome_ospite: nomeOspite,
+        id_partita: partita.id,
+        id_squadra: idSquadra,
+        data_prenotazione: new Date().toISOString(),
+        flag_annullamento: false,
+        stato: "riserva",
+      });
     });
 
   const spostaSquadra = (prenotazioneId, nuovaSquadraId) =>
@@ -310,6 +323,7 @@ export default function App() {
                   squadre={squadre} colorePerSquadra={colorePerSquadra} prenotazioni={prenotazioni}
                   titolariIds={titolariIds} contaTitolari={contaTitolari} partita={partita}
                   currentUser={currentUser} busy={busy} actionError={actionError} toggleBooking={toggleBooking}
+                  portaOspite={portaOspite}
                 />
               )}
               {tab === "stats" && <StatsTab />}
@@ -352,7 +366,7 @@ export default function App() {
 // ------------------------------------------------------------------
 function LoginScreen({ giocatori, onLogin }) {
   const opzioni = useMemo(
-    () => [...giocatori].sort((a, b) => a.nome.localeCompare(b.nome)).map((g) => ({ id: g.id, label: g.soprannome || g.nome })),
+    () => [...giocatori].sort((a, b) => (a.soprannome || a.nome).localeCompare(b.soprannome || b.nome)).map((g) => ({ id: g.id, label: g.soprannome || g.nome })),
     [giocatori]
   );
   const [selId, setSelId] = useState(() => {
@@ -505,7 +519,7 @@ function Scoreboard({ squadre, colorePerSquadra, contaTitolari }) {
   );
 }
 
-function HomeTab({ squadre, colorePerSquadra, prenotazioni, titolariIds, contaTitolari, partita, currentUser, busy, actionError, toggleBooking }) {
+function HomeTab({ squadre, colorePerSquadra, prenotazioni, titolariIds, contaTitolari, partita, currentUser, busy, actionError, toggleBooking, portaOspite }) {
   if (!partita) {
     return <div style={{ color: C.muted, fontSize: 14, textAlign: "center", padding: "40px 20px" }}>Nessuna partita con prenotazioni aperte al momento. Creane una dalla sezione Admin quando vuoi aprire il lunedì successivo.</div>;
   }
@@ -520,6 +534,8 @@ function HomeTab({ squadre, colorePerSquadra, prenotazioni, titolariIds, contaTi
       </button>
       {actionError && <div style={{ fontSize: 12, color: C.danger, textAlign: "center", marginTop: -10 }}>Errore ({actionError}) — probabile policy INSERT/UPDATE mancante su giocatori_partite.</div>}
 
+      <PortaOspite busy={busy} currentUser={currentUser} onPorta={portaOspite} />
+
       <div>
         <div className="disp" style={{ fontSize: 13, color: C.mutedFaint, marginBottom: 8 }}>Prenotati ({prenotazioni.length})</div>
         {prenotazioni.length === 0 ? (
@@ -529,6 +545,41 @@ function HomeTab({ squadre, colorePerSquadra, prenotazioni, titolariIds, contaTi
         )}
       </div>
     </div>
+  );
+}
+
+function PortaOspite({ busy, currentUser, onPorta }) {
+  const [open, setOpen] = useState(false);
+  const [nome, setNome] = useState("");
+  const [err, setErr] = useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!nome.trim()) { setErr("Serve almeno un nome."); return; }
+    setErr(null);
+    await onPorta(nome.trim(), currentUser.id_squadra);
+    setNome("");
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="disp" style={{ padding: "12px 0", borderRadius: 10, border: `1px dashed ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted }}>
+        + Porta un ospite
+      </button>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 8, background: C.surface, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14 }}>
+      <div style={{ fontSize: 12, color: C.mutedFaint }}>Giocherà nella tua squadra, senza bisogno di un account.</div>
+      <input autoFocus placeholder="Nome dell'ospite" value={nome} onChange={(e) => setNome(e.target.value)} style={inputStyle} />
+      {err && <div style={{ fontSize: 12, color: C.danger }}>{err}</div>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button type="submit" disabled={busy} className="disp" style={{ flex: 1, padding: "11px 0", borderRadius: 8, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", opacity: busy ? 0.6 : 1 }}>Aggiungi</button>
+        <button type="button" onClick={() => setOpen(false)} className="disp" style={{ padding: "11px 16px", borderRadius: 8, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted }}>Annulla</button>
+      </div>
+    </form>
   );
 }
 
@@ -543,13 +594,14 @@ function ColonnePerSquadra({ squadre, colorePerSquadra, prenotazioni, titolariId
             <div className="disp" style={{ fontSize: 11, color: colorePerSquadra[sq.id], marginBottom: 2 }}>{sq.nome} ({dellaSquadra.length})</div>
             {dellaSquadra.length === 0 && <div style={{ fontSize: 12, color: C.mutedFaint }}>—</div>}
             {dellaSquadra.map((p) => {
-              const titolare = titolariIds.has(p.id_giocatore);
+              const titolare = titolariIds.has(p.id);
               const g = p.giocatori;
+              const ospite = !g;
               return (
-                <div key={p.id} style={{ padding: "8px 10px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}`, opacity: titolare ? 1 : 0.55, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g?.soprannome || g?.nome}</div>
+                <div key={p.id} style={{ padding: "8px 10px", background: C.surface, borderRadius: 10, border: ospite ? `1px dashed ${C.line}` : `1px solid ${C.line}`, opacity: titolare ? 1 : 0.55, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ospite ? p.nome_ospite : (g?.soprannome || g?.nome)}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 }}>
-                    <span style={{ fontSize: 10, color: C.mutedFaint }}>{g?.ruolo}</span>
+                    <span style={{ fontSize: 10, color: C.mutedFaint }}>{ospite ? "OSPITE" : g?.ruolo}</span>
                     <span className="disp" style={{ fontSize: 9, color: titolare ? C.flood : C.mutedFaint }}>{titolare ? "TIT" : "RIS"}</span>
                   </div>
                 </div>
@@ -666,13 +718,16 @@ function NuovoGiocatoreForm({ squadre, busy, onCrea }) {
 }
 
 function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolariIds, partita, currentUser, busy, actionError, aggiungiPresenza, rimuoviPresenza, spostaSquadra, creaGiocatore }) {
-  const titolari = prenotazioni.filter((p) => titolariIds.has(p.id_giocatore));
-  const riserve = prenotazioni.filter((p) => !titolariIds.has(p.id_giocatore));
+  const titolari = prenotazioni.filter((p) => titolariIds.has(p.id));
+  const riserve = prenotazioni.filter((p) => !titolariIds.has(p.id));
   const nonPrenotati = useMemo(
-    () => [...giocatori].filter((g) => !prenotazioni.some((p) => p.id_giocatore === g.id)).sort((a, b) => a.nome.localeCompare(b.nome)),
+    () => [...giocatori].filter((g) => !prenotazioni.some((p) => p.id_giocatore === g.id)).sort((a, b) => (a.soprannome || a.nome).localeCompare(b.soprannome || b.nome)),
     [giocatori, prenotazioni]
   );
   const [daAggiungere, setDaAggiungere] = useState(nonPrenotati[0]?.id || "");
+  useEffect(() => {
+    if (!nonPrenotati.some((g) => g.id === daAggiungere)) setDaAggiungere(nonPrenotati[0]?.id || "");
+  }, [nonPrenotati]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!currentUser.is_admin) {
     return (
@@ -691,19 +746,26 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
 
       {actionError && <div style={{ fontSize: 12, color: C.danger }}>Errore ({actionError}) — controlla le policy INSERT/UPDATE su giocatori_partite.</div>}
 
-      {partita && nonPrenotati.length > 0 && (
-        <div style={{ display: "flex", gap: 8, position: "relative" }}>
-          <div style={{ flex: 1 }}>
-            <SearchableSelect
-              options={nonPrenotati.map((g) => ({ id: g.id, label: g.soprannome || g.nome }))}
-              value={daAggiungere}
-              onChange={setDaAggiungere}
-              placeholder="Cerca giocatore..."
-            />
-          </div>
-          <button disabled={busy} onClick={() => aggiungiPresenza(Number(daAggiungere))} className="disp" style={{ padding: "0 16px", borderRadius: 8, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", display: "flex", alignItems: "center", gap: 6, opacity: busy ? 0.6 : 1 }}>
-            <Plus size={16} /> Aggiungi
-          </button>
+      {partita && (
+        <div>
+          <div className="disp" style={{ fontSize: 13, color: C.mutedFaint, marginBottom: 8 }}>Aggiungi presenza per un giocatore già censito</div>
+          {nonPrenotati.length === 0 ? (
+            <div style={{ fontSize: 12, color: C.mutedFaint }}>Sono già tutti prenotati.</div>
+          ) : (
+            <div style={{ display: "flex", gap: 8, position: "relative" }}>
+              <div style={{ flex: 1 }}>
+                <SearchableSelect
+                  options={nonPrenotati.map((g) => ({ id: g.id, label: g.soprannome || g.nome }))}
+                  value={daAggiungere}
+                  onChange={setDaAggiungere}
+                  placeholder="Cerca giocatore..."
+                />
+              </div>
+              <button disabled={busy} onClick={() => aggiungiPresenza(Number(daAggiungere))} className="disp" style={{ padding: "0 16px", borderRadius: 8, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", display: "flex", alignItems: "center", gap: 6, opacity: busy ? 0.6 : 1 }}>
+                <Plus size={16} /> Aggiungi
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -713,12 +775,16 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {titolari.map((p) => {
             const g = p.giocatori;
+            const ospite = !g;
             const altraSquadra = squadre.find((s) => s.id !== p.id_squadra);
             return (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}` }}>
+              <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: C.surface, borderRadius: 10, border: ospite ? `1px dashed ${C.line}` : `1px solid ${C.line}` }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ width: 6, height: 6, borderRadius: "50%", background: colorePerSquadra[p.id_squadra] }} />
-                  <span style={{ fontSize: 14 }}>{g?.soprannome || g?.nome} <span style={{ color: C.mutedFaint, fontSize: 11 }}>({g?.ruolo} · {g?.forza})</span></span>
+                  <span style={{ fontSize: 14 }}>
+                    {ospite ? p.nome_ospite : (g?.soprannome || g?.nome)}{" "}
+                    <span style={{ color: C.mutedFaint, fontSize: 11 }}>{ospite ? "(ospite)" : `(${g?.ruolo} · ${g?.forza})`}</span>
+                  </span>
                 </div>
                 <div style={{ display: "flex", gap: 10 }}>
                   {altraSquadra && (
@@ -741,7 +807,7 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {riserve.map((p, idx) => (
             <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "transparent", borderRadius: 10, border: `1px dashed ${C.line}` }}>
-              <span style={{ fontSize: 13, color: C.muted }}>{p.giocatori?.soprannome || p.giocatori?.nome}</span>
+              <span style={{ fontSize: 13, color: C.muted }}>{p.giocatori ? (p.giocatori.soprannome || p.giocatori.nome) : `${p.nome_ospite} (ospite)`}</span>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span className="disp" style={{ fontSize: 10, color: C.mutedFaint }}>{idx + 1}ª riserva</span>
                 <button disabled={busy} onClick={() => rimuoviPresenza(p.id)} aria-label="Rimuovi presenza" style={{ background: "none", border: "none", cursor: "pointer", color: C.mutedFaint, padding: 4 }}>
@@ -765,7 +831,7 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
 }
 
 function AnagraficaLista({ giocatori, colorePerSquadra }) {
-  const ordinati = useMemo(() => [...giocatori].sort((a, b) => a.nome.localeCompare(b.nome)), [giocatori]);
+  const ordinati = useMemo(() => [...giocatori].sort((a, b) => (a.soprannome || a.nome).localeCompare(b.soprannome || b.nome)), [giocatori]);
   return (
     <div>
       <div className="disp" style={{ fontSize: 13, color: C.mutedFaint, marginBottom: 8 }}>Anagrafica giocatori ({ordinati.length})</div>
