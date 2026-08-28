@@ -321,7 +321,10 @@ export default function App() {
 
   const creaGiocatore = (dati) =>
     withBusy(async () => {
-      await sbWrite("giocatori", "POST", { ...dati, is_admin: false });
+      const usati = new Set(giocatori.filter((g) => g.id_squadra === dati.id_squadra).map((g) => g.numero_maglia).filter(Boolean));
+      let numero;
+      do { numero = Math.floor(Math.random() * 99) + 1; } while (usati.has(numero));
+      await sbWrite("giocatori", "POST", { ...dati, is_admin: false, numero_maglia: numero });
     });
 
   const showLoginGate = !loading && !error && giocatori.length > 0 && !currentUser;
@@ -784,7 +787,10 @@ function ColonnePerSquadra({ squadre, colorePerSquadra, prenotazioni, titolariId
               const ospite = !g;
               return (
                 <div key={p.id} style={{ padding: "8px 10px", background: C.surface, borderRadius: 10, border: ospite ? `1px dashed ${C.line}` : `1px solid ${C.line}`, opacity: titolare ? 1 : 0.55, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ospite ? p.nome_ospite : (g?.soprannome || g?.nome)}</div>
+                  <div style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {!ospite && g?.numero_maglia != null && <span className="num" style={{ color: C.mutedFaint }}>#{g.numero_maglia} </span>}
+                    {ospite ? p.nome_ospite : (g?.soprannome || g?.nome)}
+                  </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 }}>
                     <span style={{ fontSize: 10, color: C.mutedFaint }}>{ospite ? "OSPITE" : g?.ruolo}</span>
                     <span className="disp" style={{ fontSize: 9, color: titolare ? C.flood : C.mutedFaint }}>{titolare ? "TIT" : "RIS"}</span>
@@ -1040,6 +1046,139 @@ function NuovoGiocatoreForm({ squadre, busy, onCrea }) {
   );
 }
 
+// ------------------------------------------------------------------
+// Suggerisci formazione: assegna ruoli in campo con le regole di fallback
+// (manca un attaccante -> prendi un centrocampista; manca un centrocampista
+// -> prendi un difensore; manca il portiere -> prendi un difensore)
+// ------------------------------------------------------------------
+function assegnaFormazione(giocatoriSquadra) {
+  const pool = [...giocatoriSquadra];
+  const prendi = (ruolo) => {
+    const idx = pool.findIndex((g) => g.ruolo === ruolo);
+    if (idx === -1) return null;
+    return pool.splice(idx, 1)[0];
+  };
+
+  const ass = { POR: [], DIF: [], CEN: [], ATT: [] };
+  const target = { POR: 1, DIF: 3, CEN: 2, ATT: 1 };
+
+  Object.entries(target).forEach(([ruolo, n]) => {
+    for (let i = 0; i < n; i++) {
+      const g = prendi(ruolo);
+      if (g) ass[ruolo].push(g);
+    }
+  });
+
+  while (ass.ATT.length < target.ATT) { const g = prendi("CEN"); if (!g) break; ass.ATT.push(g); }
+  while (ass.CEN.length < target.CEN) { const g = prendi("DIF"); if (!g) break; ass.CEN.push(g); }
+  while (ass.POR.length < target.POR) { const g = prendi("DIF"); if (!g) break; ass.POR.push(g); }
+  while (ass.DIF.length < target.DIF && pool.length > 0) { ass.DIF.push(pool.shift()); }
+  ["POR", "CEN", "ATT"].forEach((ruolo) => {
+    while (ass[ruolo].length < target[ruolo] && pool.length > 0) ass[ruolo].push(pool.shift());
+  });
+
+  return ass;
+}
+
+function distribuisciX(n, centro = 190, ampiezza = 110) {
+  if (n <= 0) return [];
+  if (n === 1) return [centro];
+  const step = (ampiezza * 2) / (n - 1);
+  return Array.from({ length: n }, (_, i) => centro - ampiezza + i * step);
+}
+
+function CampoFormazione({ basso, alto, colorePerSquadra }) {
+  const W = 380, H = 560;
+  const yBasso = { POR: 522, DIF: 424, CEN: 322, ATT: 226 };
+  const yAlto = { POR: 38, DIF: 136, CEN: 238, ATT: 334 };
+  const etichetta = { POR: "P", DIF: "D", CEN: "CEN", ATT: "ATT" };
+
+  const renderRuolo = (arr, y, colore, idSquadra) => {
+    const xs = distribuisciX(arr.length);
+    return arr.map((g, i) => (
+      <g key={`${idSquadra}-${g.id}`} transform={`translate(${xs[i]},${y})`}>
+        <circle r="17" fill={colore} stroke="#0E1F17" strokeWidth="2" />
+        <text textAnchor="middle" dy="5" fontSize="13" fontWeight="700" fill="#0E1F17" fontFamily="'Oswald', sans-serif">{g.numero_maglia ?? "-"}</text>
+        <text textAnchor="middle" y="31" fontSize="10.5" fill="#F3F1E7" fontFamily="'Work Sans', sans-serif">{g.soprannome || g.nome}</text>
+      </g>
+    ));
+  };
+
+  const renderEtichette = (y, allineaDx) => (
+    <>
+      {Object.entries(y).map(([ruolo, yy]) => (
+        <text key={ruolo} x={allineaDx ? W - 10 : 10} y={yy + 5} textAnchor={allineaDx ? "end" : "start"} fontSize="10" fill="rgba(255,255,255,0.35)" fontFamily="'Oswald', sans-serif">
+          {etichetta[ruolo]}
+        </text>
+      ))}
+    </>
+  );
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", borderRadius: 12, display: "block" }}>
+      <rect width={W} height={H} fill="#1a5c33" />
+      {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+        <rect key={i} x="0" y={i * (H / 7)} width={W} height={H / 7} fill={i % 2 === 0 ? "rgba(255,255,255,0.03)" : "transparent"} />
+      ))}
+      <rect x="6" y="6" width={W - 12} height={H - 12} fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth="2" />
+      <line x1="6" y1={H / 2} x2={W - 6} y2={H / 2} stroke="rgba(255,255,255,0.55)" strokeWidth="2" />
+      <circle cx={W / 2} cy={H / 2} r="48" fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth="2" />
+      <circle cx={W / 2} cy={H / 2} r="3" fill="rgba(255,255,255,0.55)" />
+      <rect x={W / 2 - 66} y={H - 66} width="132" height="60" fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth="2" />
+      <rect x={W / 2 - 28} y={H - 24} width="56" height="18" fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth="2" />
+      <rect x={W / 2 - 66} y="6" width="132" height="60" fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth="2" />
+      <rect x={W / 2 - 28} y="6" width="56" height="18" fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth="2" />
+
+      {renderEtichette(yBasso, false)}
+      {renderEtichette(yAlto, true)}
+
+      {renderRuolo(basso.ass.POR, yBasso.POR, colorePerSquadra[basso.id], basso.id)}
+      {renderRuolo(basso.ass.DIF, yBasso.DIF, colorePerSquadra[basso.id], basso.id)}
+      {renderRuolo(basso.ass.CEN, yBasso.CEN, colorePerSquadra[basso.id], basso.id)}
+      {renderRuolo(basso.ass.ATT, yBasso.ATT, colorePerSquadra[basso.id], basso.id)}
+
+      {renderRuolo(alto.ass.POR, yAlto.POR, colorePerSquadra[alto.id], alto.id)}
+      {renderRuolo(alto.ass.DIF, yAlto.DIF, colorePerSquadra[alto.id], alto.id)}
+      {renderRuolo(alto.ass.CEN, yAlto.CEN, colorePerSquadra[alto.id], alto.id)}
+      {renderRuolo(alto.ass.ATT, yAlto.ATT, colorePerSquadra[alto.id], alto.id)}
+    </svg>
+  );
+}
+
+function SuggerisciFormazione({ prenotazioni, titolariIds, squadre, colorePerSquadra }) {
+  const [aperto, setAperto] = useState(false);
+
+  const mappaGiocatore = (p) => p.giocatori
+    ? { id: p.giocatori.id, nome: p.giocatori.nome, soprannome: p.giocatori.soprannome, ruolo: p.giocatori.ruolo, numero_maglia: p.giocatori.numero_maglia }
+    : { id: `ospite-${p.id}`, nome: p.nome_ospite, soprannome: p.nome_ospite, ruolo: null, numero_maglia: null };
+
+  const datiSquadra = (sq) => {
+    const titolari = prenotazioni.filter((p) => p.id_squadra === sq.id && titolariIds.has(p.id)).map(mappaGiocatore);
+    return { id: sq.id, nome: sq.nome, ass: assegnaFormazione(titolari) };
+  };
+
+  return (
+    <div>
+      <button onClick={() => setAperto((v) => !v)} style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "none", cursor: "pointer", background: C.surface2, color: C.chalk, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} className="disp">
+        <ShieldCheck size={18} /> {aperto ? "Nascondi formazione" : "Suggerisci formazione"}
+      </button>
+
+      {aperto && squadre.length === 2 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "0 4px 6px" }}>
+            <span className="disp" style={{ fontSize: 12, color: colorePerSquadra[squadre[1].id] }}>{squadre[1].nome}</span>
+            <span className="disp" style={{ fontSize: 12, color: colorePerSquadra[squadre[0].id] }}>{squadre[0].nome}</span>
+          </div>
+          <CampoFormazione basso={datiSquadra(squadre[0])} alto={datiSquadra(squadre[1])} colorePerSquadra={colorePerSquadra} />
+          <div style={{ fontSize: 11, color: C.mutedFaint, marginTop: 8 }}>
+            Proposta automatica in base ai ruoli dichiarati — se manca un ruolo, viene ripiegato sul più vicino (attaccante → centrocampista → difensore; portiere → difensore). Gli ospiti (senza ruolo dichiarato) riempiono gli ultimi posti liberi.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolariIds, partita, currentUser, busy, actionError, rimuoviPresenza, spostaSquadra, creaGiocatore }) {
   const titolari = prenotazioni.filter((p) => titolariIds.has(p.id));
   const riserve = prenotazioni.filter((p) => !titolariIds.has(p.id));
@@ -1059,9 +1198,7 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
 
       <Collassabile titolo="Gestisci Prossima Partita">
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <button style={{ padding: "14px 0", borderRadius: 12, border: "none", cursor: "pointer", background: C.surface2, color: C.chalk, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} className="disp">
-            <ShieldCheck size={18} /> Suggerisci formazione
-          </button>
+          <SuggerisciFormazione prenotazioni={prenotazioni} titolariIds={titolariIds} squadre={squadre} colorePerSquadra={colorePerSquadra} />
 
           <Collassabile titolo={`Titolari (${titolari.length}/14)`}>
             {titolari.length === 0 && <div style={{ fontSize: 12, color: C.mutedFaint }}>Nessuno ancora.</div>}
@@ -1133,7 +1270,10 @@ function AnagraficaLista({ giocatori, colorePerSquadra }) {
           <div key={g.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div style={{ width: 6, height: 6, borderRadius: "50%", background: colorePerSquadra[g.id_squadra] }} />
-              <span style={{ fontSize: 14 }}>{g.soprannome || g.nome} <span style={{ color: C.mutedFaint, fontSize: 11 }}>({g.ruolo} · {g.forza})</span></span>
+              <span style={{ fontSize: 14 }}>
+                {g.numero_maglia != null && <span className="num" style={{ color: C.mutedFaint }}>#{g.numero_maglia} </span>}
+                {g.soprannome || g.nome} <span style={{ color: C.mutedFaint, fontSize: 11 }}>({g.ruolo} · {g.forza})</span>
+              </span>
             </div>
             {g.is_admin && <span className="disp" style={{ fontSize: 9, color: C.flood }}>ADMIN</span>}
           </div>
