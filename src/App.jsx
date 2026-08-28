@@ -324,9 +324,19 @@ export default function App() {
       await sbWrite(`giocatori?id=eq.${currentUser.id}`, "PATCH", { pin: nuovoPin });
     });
 
+  const notificaTelegram = (testo) => {
+    fetch("/api/notify-telegram", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: testo }),
+    }).catch(() => {}); // best-effort: se fallisce (es. in locale, o non ancora configurato) non deve bloccare nulla
+  };
+
   const richiediResetPin = (idGiocatore) =>
     withBusy(async () => {
       await sbWrite("richieste_pin", "POST", { id_giocatore: idGiocatore, stato: "aperta" });
+      const g = giocatori.find((x) => x.id === idGiocatore);
+      notificaTelegram(`⚽ ${g?.soprannome || g?.nome || "Qualcuno"} ha richiesto il reset del PIN`);
     });
 
   const generaNuovoPin = (idGiocatore, idRichiesta) =>
