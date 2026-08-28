@@ -344,6 +344,8 @@ export default function App() {
       const nuovoPin = String(Math.floor(1000 + Math.random() * 9000));
       await sbWrite(`giocatori?id=eq.${idGiocatore}`, "PATCH", { pin: nuovoPin });
       await sbWrite(`richieste_pin?id=eq.${idRichiesta}`, "PATCH", { stato: "gestita" });
+      const g = giocatori.find((x) => x.id === idGiocatore);
+      notificaTelegram(`🔑 Nuovo PIN per ${g?.soprannome || g?.nome || "il giocatore"}: ${nuovoPin}`);
       return nuovoPin;
     });
 
@@ -546,6 +548,7 @@ function ProfileModal({ currentUser, busy, actionError, onSaveProfilo, onCambiaP
   const [copiato, setCopiato] = useState(null);
 
   const richiesteAperte = richiestePin.filter((r) => r.stato === "aperta");
+  const daMostrare = richiestePin.filter((r) => r.stato === "aperta" || pinGenerati[r.id]);
 
   const genera = async (r) => {
     const nuovoPin = await onGeneraPin(r.id_giocatore, r.id);
@@ -589,10 +592,10 @@ function ProfileModal({ currentUser, busy, actionError, onSaveProfilo, onCambiaP
           <button onClick={onClose} aria-label="Chiudi" style={{ background: "none", border: "none", color: C.mutedFaint, cursor: "pointer" }}><X size={20} /></button>
         </div>
 
-        {currentUser.is_admin && (richiesteAperte.length > 0 || Object.keys(pinGenerati).length > 0) && (
+        {currentUser.is_admin && daMostrare.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, background: C.surface2, borderRadius: 10, padding: 12 }}>
             <div className="disp" style={{ fontSize: 12, color: C.mutedFaint }}>Richieste reset PIN</div>
-            {richiesteAperte.map((r) => {
+            {daMostrare.map((r) => {
               const nome = r.giocatori?.soprannome || r.giocatori?.nome || "Qualcuno";
               const pinGenerato = pinGenerati[r.id];
               return (
