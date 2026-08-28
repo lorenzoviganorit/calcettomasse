@@ -147,6 +147,7 @@ export default function App() {
   const [partita, setPartita] = useState(null);
   const [prenotazioni, setPrenotazioni] = useState([]);
   const [storico, setStorico] = useState([]);
+  const [richiestePin, setRichiestePin] = useState([]);
   const [currentUserId, setCurrentUserId] = useState(() => localStorage.getItem(LOCAL_KEY) || null);
   const [showProfile, setShowProfile] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -155,11 +156,12 @@ export default function App() {
   const fetchAll = useCallback(async () => {
     try {
       setError(null);
-      const [sq, gio, part, storicoData] = await Promise.all([
+      const [sq, gio, part, storicoData, richieste] = await Promise.all([
         sb("squadre?select=*"),
         sb("giocatori?select=*"),
         sb("partite?select=*&stato=eq.aperta&order=data_partita.asc&limit=1"),
         sb("partite?select=*&stato=in.(giocata,conclusa)&order=data_partita.desc&limit=50"),
+        sb("richieste_pin?select=*,giocatori(*)&order=creato_il.desc&limit=50"),
       ]);
       let pren = [];
       if (part[0]) {
@@ -172,6 +174,7 @@ export default function App() {
       setPartita(part[0] || null);
       setPrenotazioni(pren);
       setStorico(storicoData);
+      setRichiestePin(richieste);
     } catch (e) {
       setError(e.message);
     }
@@ -208,10 +211,12 @@ export default function App() {
     setBusy(true);
     setActionError(null);
     try {
-      await fn();
+      const risultato = await fn();
       await fetchAll();
+      return risultato;
     } catch (e) {
       setActionError(e.message);
+      return null;
     } finally {
       setBusy(false);
     }
@@ -319,6 +324,19 @@ export default function App() {
       await sbWrite(`giocatori?id=eq.${currentUser.id}`, "PATCH", { pin: nuovoPin });
     });
 
+  const richiediResetPin = (idGiocatore) =>
+    withBusy(async () => {
+      await sbWrite("richieste_pin", "POST", { id_giocatore: idGiocatore, stato: "aperta" });
+    });
+
+  const generaNuovoPin = (idGiocatore, idRichiesta) =>
+    withBusy(async () => {
+      const nuovoPin = String(Math.floor(1000 + Math.random() * 9000));
+      await sbWrite(`giocatori?id=eq.${idGiocatore}`, "PATCH", { pin: nuovoPin });
+      await sbWrite(`richieste_pin?id=eq.${idRichiesta}`, "PATCH", { stato: "gestita" });
+      return nuovoPin;
+    });
+
   const creaGiocatore = (dati) =>
     withBusy(async () => {
       const usati = new Set(giocatori.filter((g) => g.id_squadra === dati.id_squadra).map((g) => g.numero_maglia).filter(Boolean));
@@ -343,7 +361,6 @@ export default function App() {
       <div style={{ width: "100%", maxWidth: 430, minHeight: "100vh", display: "flex", flexDirection: "column", position: "relative" }}>
         <div style={{ padding: "28px 20px 16px", background: `radial-gradient(120% 100% at 50% 0%, ${C.surface2} 0%, ${C.bg} 70%)`, borderBottom: `1px solid ${C.line}`, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
-            <div className="disp" style={{ fontSize: 12, color: C.mutedFaint, letterSpacing: "0.12em" }}>DATI REALI · SUPABASE</div>
             {tab === "home" ? (
               <>
                 <div className="disp" style={{ fontSize: 26, marginTop: 2 }}>
@@ -362,9 +379,12 @@ export default function App() {
           {currentUser && (
             <button onClick={() => setShowProfile(true)} aria-label="Profilo" style={{
               width: 38, height: 38, borderRadius: "50%", background: C.surface2, border: `1px solid ${C.line}`,
-              color: C.flood, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0,
+              color: C.flood, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, position: "relative",
             }} className="disp">
               {(currentUser.soprannome || currentUser.nome || "?").slice(0, 2).toUpperCase()}
+              {currentUser.is_admin && richiestePin.some((r) => r.stato === "aperta") && (
+                <span style={{ position: "absolute", top: -2, right: -2, width: 12, height: 12, borderRadius: "50%", background: C.danger, border: `2px solid ${C.bg}` }} />
+              )}
             </button>
           )}
         </div>
@@ -381,7 +401,7 @@ export default function App() {
             </div>
           )}
 
-          {showLoginGate && <LoginScreen giocatori={giocatori} onLogin={handleLogin} />}
+          {showLoginGate && <LoginScreen giocatori={giocatori} onLogin={handleLogin} richiestePin={richiestePin} onRichiediReset={richiediResetPin} />}
 
           {!loading && !error && currentUser && (
             <>
@@ -430,7 +450,7 @@ export default function App() {
         )}
 
         {showProfile && currentUser && (
-          <ProfileModal currentUser={currentUser} busy={busy} actionError={actionError} onSaveProfilo={salvaProfilo} onCambiaPin={cambiaPin} onLogout={handleLogout} onClose={() => setShowProfile(false)} />
+          <ProfileModal currentUser={currentUser} busy={busy} actionError={actionError} onSaveProfilo={salvaProfilo} onCambiaPin={cambiaPin} onLogout={handleLogout} onClose={() => setShowProfile(false)} richiestePin={richiestePin} onGeneraPin={generaNuovoPin} />
         )}
       </div>
     </div>
@@ -438,7 +458,7 @@ export default function App() {
 }
 
 // ------------------------------------------------------------------
-function LoginScreen({ giocatori, onLogin }) {
+function LoginScreen({ giocatori, onLogin, richiestePin, onRichiediReset }) {
   const opzioni = useMemo(
     () => [...giocatori].sort((a, b) => (a.soprannome || a.nome).localeCompare(b.soprannome || b.nome)).map((g) => ({ id: g.id, label: g.soprannome || g.nome })),
     [giocatori]
@@ -449,10 +469,12 @@ function LoginScreen({ giocatori, onLogin }) {
   });
   const [pin, setPin] = useState("");
   const [err, setErr] = useState(null);
+  const [richiestaInviata, setRichiestaInviata] = useState(false);
 
   const selectPlayer = (id) => {
     setSelId(id);
     localStorage.setItem(LAST_LOGIN_KEY, id);
+    setRichiestaInviata(false);
   };
 
   const submit = (e) => {
@@ -463,6 +485,13 @@ function LoginScreen({ giocatori, onLogin }) {
     } else {
       setErr("PIN errato — riprova.");
     }
+  };
+
+  const richiestaGiaAperta = richiestePin.some((r) => r.stato === "aperta" && String(r.id_giocatore) === String(selId));
+
+  const chiediReset = async () => {
+    await onRichiediReset(Number(selId));
+    setRichiestaInviata(true);
   };
 
   return (
@@ -480,11 +509,19 @@ function LoginScreen({ giocatori, onLogin }) {
       <button type="submit" className="disp" style={{ padding: "14px 0", borderRadius: 12, border: "none", cursor: "pointer", background: C.flood, color: "#12200F" }}>
         Entra
       </button>
+
+      {richiestaGiaAperta || richiestaInviata ? (
+        <div style={{ fontSize: 12, color: C.mutedFaint, textAlign: "center" }}>Richiesta inviata — aspetta che un admin ti mandi il nuovo PIN.</div>
+      ) : (
+        <button type="button" onClick={chiediReset} className="disp" style={{ background: "none", border: "none", cursor: "pointer", color: C.mutedFaint, fontSize: 12, textDecoration: "underline" }}>
+          Hai dimenticato il PIN?
+        </button>
+      )}
     </form>
   );
 }
 
-function ProfileModal({ currentUser, busy, actionError, onSaveProfilo, onCambiaPin, onLogout, onClose }) {
+function ProfileModal({ currentUser, busy, actionError, onSaveProfilo, onCambiaPin, onLogout, onClose, richiestePin, onGeneraPin }) {
   const [nome, setNome] = useState(currentUser.nome || "");
   const [soprannome, setSoprannome] = useState(currentUser.soprannome || "");
   const [savedMsg, setSavedMsg] = useState(false);
@@ -494,6 +531,22 @@ function ProfileModal({ currentUser, busy, actionError, onSaveProfilo, onCambiaP
   const [pinNuovo, setPinNuovo] = useState("");
   const [pinErr, setPinErr] = useState(null);
   const [pinOk, setPinOk] = useState(false);
+
+  const [pinGenerati, setPinGenerati] = useState({}); // idRichiesta -> pin, resta visibile finché non chiudi il modale
+  const [copiato, setCopiato] = useState(null);
+
+  const richiesteAperte = richiestePin.filter((r) => r.stato === "aperta");
+
+  const genera = async (r) => {
+    const nuovoPin = await onGeneraPin(r.id_giocatore, r.id);
+    if (nuovoPin) setPinGenerati((prev) => ({ ...prev, [r.id]: nuovoPin }));
+  };
+
+  const copia = (idRichiesta, pin) => {
+    navigator.clipboard?.writeText(pin);
+    setCopiato(idRichiesta);
+    setTimeout(() => setCopiato(null), 1500);
+  };
 
   const salvaProfiloClick = async () => {
     await onSaveProfilo(nome, soprannome);
@@ -525,6 +578,38 @@ function ProfileModal({ currentUser, busy, actionError, onSaveProfilo, onCambiaP
           <div className="disp" style={{ fontSize: 18 }}>Il tuo profilo</div>
           <button onClick={onClose} aria-label="Chiudi" style={{ background: "none", border: "none", color: C.mutedFaint, cursor: "pointer" }}><X size={20} /></button>
         </div>
+
+        {currentUser.is_admin && (richiesteAperte.length > 0 || Object.keys(pinGenerati).length > 0) && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, background: C.surface2, borderRadius: 10, padding: 12 }}>
+            <div className="disp" style={{ fontSize: 12, color: C.mutedFaint }}>Richieste reset PIN</div>
+            {richiesteAperte.map((r) => {
+              const nome = r.giocatori?.soprannome || r.giocatori?.nome || "Qualcuno";
+              const pinGenerato = pinGenerati[r.id];
+              return (
+                <div key={r.id} style={{ fontSize: 13 }}>
+                  {!pinGenerato ? (
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      <span>{nome} ha richiesto il reset del PIN</span>
+                      <button disabled={busy} onClick={() => genera(r)} className="disp" style={{ padding: "6px 10px", borderRadius: 6, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", fontSize: 10, flexShrink: 0, opacity: busy ? 0.6 : 1 }}>
+                        Genera PIN
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      <span>Nuovo PIN per {nome}: <span className="num" style={{ color: C.flood }}>{pinGenerato}</span></span>
+                      <button onClick={() => copia(r.id, pinGenerato)} className="disp" style={{ padding: "6px 10px", borderRadius: 6, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted, fontSize: 10, flexShrink: 0 }}>
+                        {copiato === r.id ? "Copiato ✓" : "Copia"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {Object.keys(pinGenerati).length > 0 && (
+              <div style={{ fontSize: 10, color: C.mutedFaint }}>Invia il PIN a mano (es. WhatsApp) — non parte nessun messaggio automatico.</div>
+            )}
+          </div>
+        )}
 
         <label style={labelStyle}>Nome</label>
         <input value={nome} onChange={(e) => setNome(e.target.value)} style={{ ...inputStyle, marginTop: -8 }} />
