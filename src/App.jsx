@@ -260,6 +260,21 @@ export default function App() {
       await sbWrite(`giocatori_partite?id=eq.${prenotazioneId}`, "PATCH", { id_squadra: nuovaSquadraId });
     });
 
+  const chiudiPartita = (golPerSquadra, nuovaData) =>
+    withBusy(async () => {
+      await sbWrite(`partite?id=eq.${partita.id}`, "PATCH", {
+        stato: "giocata",
+        id_squadra_1: squadre[0].id,
+        gol_squadra_1: golPerSquadra[squadre[0].id],
+        id_squadra_2: squadre[1].id,
+        gol_squadra_2: golPerSquadra[squadre[1].id],
+      });
+      await sbWrite("partite", "POST", {
+        data_partita: nuovaData,
+        stato: "aperta",
+      });
+    });
+
   const salvaProfilo = (nome, soprannome) =>
     withBusy(async () => {
       await sbWrite(`giocatori?id=eq.${currentUser.id}`, "PATCH", { nome, soprannome });
@@ -330,7 +345,8 @@ export default function App() {
                   squadre={squadre} colorePerSquadra={colorePerSquadra} prenotazioni={prenotazioni}
                   titolariIds={titolariIds} contaTitolari={contaTitolari} partita={partita}
                   currentUser={currentUser} busy={busy} actionError={actionError} toggleBooking={toggleBooking}
-                  portaOspite={portaOspite}
+                  portaOspite={portaOspite} giocatori={giocatori} aggiungiPresenza={aggiungiPresenza}
+                  chiudiPartita={chiudiPartita}
                 />
               )}
               {tab === "stats" && <StatsTab />}
@@ -339,7 +355,7 @@ export default function App() {
                   giocatori={giocatori} squadre={squadre} colorePerSquadra={colorePerSquadra}
                   prenotazioni={prenotazioni} titolariIds={titolariIds} partita={partita}
                   currentUser={currentUser} busy={busy} actionError={actionError}
-                  aggiungiPresenza={aggiungiPresenza} rimuoviPresenza={rimuoviPresenza} spostaSquadra={spostaSquadra}
+                  rimuoviPresenza={rimuoviPresenza} spostaSquadra={spostaSquadra}
                   creaGiocatore={creaGiocatore}
                 />
               )}
@@ -526,11 +542,12 @@ function Scoreboard({ squadre, colorePerSquadra, contaTitolari }) {
   );
 }
 
-function HomeTab({ squadre, colorePerSquadra, prenotazioni, titolariIds, contaTitolari, partita, currentUser, busy, actionError, toggleBooking, portaOspite }) {
+function HomeTab({ squadre, colorePerSquadra, prenotazioni, titolariIds, contaTitolari, partita, currentUser, busy, actionError, toggleBooking, portaOspite, giocatori, aggiungiPresenza, chiudiPartita }) {
   if (!partita) {
     return <div style={{ color: C.muted, fontSize: 14, textAlign: "center", padding: "40px 20px" }}>Nessuna partita con prenotazioni aperte al momento. Creane una dalla sezione Admin quando vuoi aprire il lunedì successivo.</div>;
   }
   const mia = prenotazioni.find((p) => p.id_giocatore === currentUser.id);
+  const nonPrenotati = giocatori.filter((g) => !prenotazioni.some((p) => p.id_giocatore === g.id));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
@@ -541,7 +558,10 @@ function HomeTab({ squadre, colorePerSquadra, prenotazioni, titolariIds, contaTi
       </button>
       {actionError && <div style={{ fontSize: 12, color: C.danger, textAlign: "center", marginTop: -10 }}>Errore ({actionError}) — probabile policy INSERT/UPDATE mancante su giocatori_partite.</div>}
 
-      <PortaOspite busy={busy} currentUser={currentUser} onPorta={portaOspite} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <PortaOspite busy={busy} currentUser={currentUser} onPorta={portaOspite} />
+        <PrenotaCompagno busy={busy} nonPrenotati={nonPrenotati} onAggiungi={aggiungiPresenza} />
+      </div>
 
       <div>
         <div className="disp" style={{ fontSize: 13, color: C.mutedFaint, marginBottom: 8 }}>Prenotati ({prenotazioni.length})</div>
@@ -551,7 +571,121 @@ function HomeTab({ squadre, colorePerSquadra, prenotazioni, titolariIds, contaTi
           <ColonnePerSquadra squadre={squadre} colorePerSquadra={colorePerSquadra} prenotazioni={prenotazioni} titolariIds={titolariIds} />
         )}
       </div>
+
+      {currentUser.is_admin && (
+        <ChiudiPartita busy={busy} squadre={squadre} colorePerSquadra={colorePerSquadra} partita={partita} onChiudi={chiudiPartita} />
+      )}
     </div>
+  );
+}
+
+function PrenotaCompagno({ busy, nonPrenotati, onAggiungi }) {
+  const [open, setOpen] = useState(false);
+  const opzioni = useMemo(
+    () => [...nonPrenotati].sort((a, b) => (a.soprannome || a.nome).localeCompare(b.soprannome || b.nome)).map((g) => ({ id: g.id, label: g.soprannome || g.nome })),
+    [nonPrenotati]
+  );
+  const [sel, setSel] = useState(opzioni[0]?.id || "");
+
+  useEffect(() => {
+    if (!opzioni.some((o) => o.id === sel)) setSel(opzioni[0]?.id || "");
+  }, [opzioni]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="disp" style={{ padding: "12px 0", borderRadius: 10, border: `1px dashed ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted }}>
+        + Prenota un compagno
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, background: C.surface, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14 }}>
+      <div style={{ fontSize: 12, color: C.mutedFaint }}>Per un giocatore già censito che non si è ancora prenotato da solo.</div>
+      {opzioni.length === 0 ? (
+        <div style={{ fontSize: 12, color: C.mutedFaint }}>Sono già tutti prenotati.</div>
+      ) : (
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <SearchableSelect options={opzioni} value={sel} onChange={setSel} placeholder="Cerca giocatore..." />
+          </div>
+          <button disabled={busy} onClick={async () => { await onAggiungi(Number(sel)); setOpen(false); }} className="disp" style={{ padding: "0 16px", borderRadius: 8, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", opacity: busy ? 0.6 : 1 }}>
+            Aggiungi
+          </button>
+        </div>
+      )}
+      <button onClick={() => setOpen(false)} className="disp" style={{ padding: "9px 0", borderRadius: 8, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted, fontSize: 11 }}>Annulla</button>
+    </div>
+  );
+}
+
+// Le prossime N date di lunedì successive a partire dalla data della partita corrente
+function prossimiLunedi(dataPartitaStr, count = 8) {
+  const base = new Date(`${dataPartitaStr}T00:00:00`);
+  const out = [];
+  for (let i = 1; i <= count; i++) {
+    const d = new Date(base);
+    d.setDate(d.getDate() + 7 * i);
+    out.push(d);
+  }
+  return out;
+}
+const toISODate = (d) => d.toISOString().slice(0, 10);
+
+function ChiudiPartita({ busy, squadre, colorePerSquadra, partita, onChiudi }) {
+  const [open, setOpen] = useState(false);
+  const [gol1, setGol1] = useState("");
+  const [gol2, setGol2] = useState("");
+  const opzioniData = useMemo(() => prossimiLunedi(partita.data_partita), [partita.data_partita]);
+  const [prossimaData, setProssimaData] = useState(() => toISODate(opzioniData[0]));
+  const [err, setErr] = useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (gol1 === "" || gol2 === "") { setErr("Inserisci il punteggio di entrambe le squadre."); return; }
+    setErr(null);
+    await onChiudi({ [squadre[0].id]: Number(gol1), [squadre[1].id]: Number(gol2) }, prossimaData);
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="disp" style={{ padding: "13px 0", borderRadius: 10, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted }}>
+        Chiudi partita e inserisci risultato
+      </button>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10, background: C.surface, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14 }}>
+      <div className="disp" style={{ fontSize: 13, color: C.mutedFaint }}>Risultato finale</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <div className="disp" style={{ fontSize: 11, color: colorePerSquadra[squadre[0].id], marginBottom: 4 }}>{squadre[0].nome}</div>
+          <input type="number" min={0} inputMode="numeric" value={gol1} onChange={(e) => setGol1(e.target.value)} style={inputStyle} />
+        </div>
+        <span className="disp" style={{ color: C.mutedFaint, marginTop: 16 }}>—</span>
+        <div style={{ flex: 1 }}>
+          <div className="disp" style={{ fontSize: 11, color: colorePerSquadra[squadre[1].id], marginBottom: 4 }}>{squadre[1].nome}</div>
+          <input type="number" min={0} inputMode="numeric" value={gol2} onChange={(e) => setGol2(e.target.value)} style={inputStyle} />
+        </div>
+      </div>
+
+      <label style={labelStyle}>Prossima partita</label>
+      <select value={prossimaData} onChange={(e) => setProssimaData(e.target.value)} style={{ ...inputStyle, marginTop: -6 }}>
+        {opzioniData.map((d) => (
+          <option key={toISODate(d)} value={toISODate(d)}>
+            {d.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })}
+          </option>
+        ))}
+      </select>
+
+      {err && <div style={{ fontSize: 12, color: C.danger }}>{err}</div>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button type="submit" disabled={busy} className="disp" style={{ flex: 1, padding: "12px 0", borderRadius: 8, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", opacity: busy ? 0.6 : 1 }}>Conferma</button>
+        <button type="button" onClick={() => setOpen(false)} className="disp" style={{ padding: "12px 16px", borderRadius: 8, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted }}>Annulla</button>
+      </div>
+    </form>
   );
 }
 
@@ -724,17 +858,9 @@ function NuovoGiocatoreForm({ squadre, busy, onCrea }) {
   );
 }
 
-function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolariIds, partita, currentUser, busy, actionError, aggiungiPresenza, rimuoviPresenza, spostaSquadra, creaGiocatore }) {
+function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolariIds, partita, currentUser, busy, actionError, rimuoviPresenza, spostaSquadra, creaGiocatore }) {
   const titolari = prenotazioni.filter((p) => titolariIds.has(p.id));
   const riserve = prenotazioni.filter((p) => !titolariIds.has(p.id));
-  const nonPrenotati = useMemo(
-    () => [...giocatori].filter((g) => !prenotazioni.some((p) => p.id_giocatore === g.id)).sort((a, b) => (a.soprannome || a.nome).localeCompare(b.soprannome || b.nome)),
-    [giocatori, prenotazioni]
-  );
-  const [daAggiungere, setDaAggiungere] = useState(nonPrenotati[0]?.id || "");
-  useEffect(() => {
-    if (!nonPrenotati.some((g) => g.id === daAggiungere)) setDaAggiungere(nonPrenotati[0]?.id || "");
-  }, [nonPrenotati]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!currentUser.is_admin) {
     return (
@@ -752,29 +878,6 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
       </button>
 
       {actionError && <div style={{ fontSize: 12, color: C.danger }}>Errore ({actionError}) — controlla le policy INSERT/UPDATE su giocatori_partite.</div>}
-
-      {partita && (
-        <div>
-          <div className="disp" style={{ fontSize: 13, color: C.mutedFaint, marginBottom: 8 }}>Aggiungi presenza per un giocatore già censito</div>
-          {nonPrenotati.length === 0 ? (
-            <div style={{ fontSize: 12, color: C.mutedFaint }}>Sono già tutti prenotati.</div>
-          ) : (
-            <div style={{ display: "flex", gap: 8, position: "relative" }}>
-              <div style={{ flex: 1 }}>
-                <SearchableSelect
-                  options={nonPrenotati.map((g) => ({ id: g.id, label: g.soprannome || g.nome }))}
-                  value={daAggiungere}
-                  onChange={setDaAggiungere}
-                  placeholder="Cerca giocatore..."
-                />
-              </div>
-              <button disabled={busy} onClick={() => aggiungiPresenza(Number(daAggiungere))} className="disp" style={{ padding: "0 16px", borderRadius: 8, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", display: "flex", alignItems: "center", gap: 6, opacity: busy ? 0.6 : 1 }}>
-                <Plus size={16} /> Aggiungi
-              </button>
-            </div>
-          )}
-        </div>
-      )}
 
       <div>
         <div className="disp" style={{ fontSize: 13, color: C.mutedFaint, marginBottom: 8 }}>Titolari ({titolari.length}/14)</div>
