@@ -314,9 +314,9 @@ export default function App() {
       }
     });
 
-  const salvaProfilo = (nome, soprannome) =>
+  const salvaProfilo = (nome, soprannome, numeroMaglia) =>
     withBusy(async () => {
-      await sbWrite(`giocatori?id=eq.${currentUser.id}`, "PATCH", { nome, soprannome });
+      await sbWrite(`giocatori?id=eq.${currentUser.id}`, "PATCH", { nome, soprannome, numero_maglia: numeroMaglia });
     });
 
   const cambiaPin = (nuovoPin) =>
@@ -462,7 +462,7 @@ export default function App() {
         )}
 
         {showProfile && currentUser && (
-          <ProfileModal currentUser={currentUser} busy={busy} actionError={actionError} onSaveProfilo={salvaProfilo} onCambiaPin={cambiaPin} onLogout={handleLogout} onClose={() => setShowProfile(false)} richiestePin={richiestePin} onGeneraPin={generaNuovoPin} />
+          <ProfileModal currentUser={currentUser} busy={busy} actionError={actionError} onSaveProfilo={salvaProfilo} onCambiaPin={cambiaPin} onLogout={handleLogout} onClose={() => setShowProfile(false)} richiestePin={richiestePin} onGeneraPin={generaNuovoPin} giocatori={giocatori} />
         )}
       </div>
     </div>
@@ -533,10 +533,15 @@ function LoginScreen({ giocatori, onLogin, richiestePin, onRichiediReset }) {
   );
 }
 
-function ProfileModal({ currentUser, busy, actionError, onSaveProfilo, onCambiaPin, onLogout, onClose, richiestePin, onGeneraPin }) {
+function ProfileModal({ currentUser, busy, actionError, onSaveProfilo, onCambiaPin, onLogout, onClose, richiestePin, onGeneraPin, giocatori }) {
   const [nome, setNome] = useState(currentUser.nome || "");
   const [soprannome, setSoprannome] = useState(currentUser.soprannome || "");
+  const [numeroMaglia, setNumeroMaglia] = useState(currentUser.numero_maglia != null ? String(currentUser.numero_maglia) : "");
   const [savedMsg, setSavedMsg] = useState(false);
+
+  const conflittoMaglia = numeroMaglia !== "" && giocatori.find(
+    (g) => g.id_squadra === currentUser.id_squadra && g.id !== currentUser.id && String(g.numero_maglia) === String(Number(numeroMaglia))
+  );
 
   const [showPin, setShowPin] = useState(false);
   const [pinAttuale, setPinAttuale] = useState("");
@@ -562,7 +567,8 @@ function ProfileModal({ currentUser, busy, actionError, onSaveProfilo, onCambiaP
   };
 
   const salvaProfiloClick = async () => {
-    await onSaveProfilo(nome, soprannome);
+    if (conflittoMaglia) return;
+    await onSaveProfilo(nome, soprannome, numeroMaglia === "" ? null : Number(numeroMaglia));
     setSavedMsg(true);
     setTimeout(() => setSavedMsg(false), 2000);
   };
@@ -630,10 +636,18 @@ function ProfileModal({ currentUser, busy, actionError, onSaveProfilo, onCambiaP
         <label style={labelStyle}>Soprannome</label>
         <input value={soprannome} onChange={(e) => setSoprannome(e.target.value)} style={{ ...inputStyle, marginTop: -8 }} />
 
+        <label style={labelStyle}>Numero di maglia</label>
+        <input type="number" min={1} max={99} inputMode="numeric" value={numeroMaglia} onChange={(e) => setNumeroMaglia(e.target.value.replace(/\D/g, ""))} style={{ ...inputStyle, marginTop: -8 }} />
+        {conflittoMaglia && (
+          <div style={{ fontSize: 12, color: C.danger, marginTop: -8 }}>
+            Numero già in uso da {conflittoMaglia.soprannome || conflittoMaglia.nome}
+          </div>
+        )}
+
         {actionError && <div style={{ fontSize: 12, color: C.danger }}>Errore nel salvataggio ({actionError}).</div>}
         {savedMsg && <div style={{ fontSize: 12, color: C.flood }}>Salvato ✓</div>}
 
-        <button disabled={busy} onClick={salvaProfiloClick} className="disp" style={{ padding: "13px 0", borderRadius: 10, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", opacity: busy ? 0.6 : 1 }}>
+        <button disabled={busy || !!conflittoMaglia} onClick={salvaProfiloClick} className="disp" style={{ padding: "13px 0", borderRadius: 10, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", opacity: (busy || conflittoMaglia) ? 0.6 : 1 }}>
           Salva profilo
         </button>
 
