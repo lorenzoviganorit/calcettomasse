@@ -543,25 +543,39 @@ function Scoreboard({ squadre, colorePerSquadra, contaTitolari }) {
 }
 
 function HomeTab({ squadre, colorePerSquadra, prenotazioni, titolariIds, contaTitolari, partita, currentUser, busy, actionError, toggleBooking, portaOspite, giocatori, aggiungiPresenza, chiudiPartita }) {
+  const [panel, setPanel] = useState(null); // null | 'ospite' | 'compagno'
+
   if (!partita) {
     return <div style={{ color: C.muted, fontSize: 14, textAlign: "center", padding: "40px 20px" }}>Nessuna partita con prenotazioni aperte al momento. Creane una dalla sezione Admin quando vuoi aprire il lunedì successivo.</div>;
   }
   const mia = prenotazioni.find((p) => p.id_giocatore === currentUser.id);
   const nonPrenotati = giocatori.filter((g) => !prenotazioni.some((p) => p.id_giocatore === g.id));
 
+  const smallBtn = (active) => ({
+    flex: 1, padding: "13px 4px", borderRadius: 10, cursor: "pointer", fontSize: 11,
+    border: `1px ${active ? "solid" : "dashed"} ${C.line}`, background: active ? C.surface2 : "transparent", color: C.muted,
+  });
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <Scoreboard squadre={squadre} colorePerSquadra={colorePerSquadra} contaTitolari={contaTitolari} />
 
-      <button disabled={busy} onClick={toggleBooking} style={{ padding: "16px 0", borderRadius: 12, cursor: "pointer", background: mia ? "transparent" : C.flood, color: mia ? C.flood : "#12200F", border: `2px solid ${C.flood}`, opacity: busy ? 0.6 : 1 }} className="disp">
-        {mia ? "✓ Ci sarai — tocca per annullare" : "Ci sono! ✅"}
-      </button>
-      {actionError && <div style={{ fontSize: 12, color: C.danger, textAlign: "center", marginTop: -10 }}>Errore ({actionError}) — probabile policy INSERT/UPDATE mancante su giocatori_partite.</div>}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <PortaOspite busy={busy} currentUser={currentUser} onPorta={portaOspite} />
-        <PrenotaCompagno busy={busy} nonPrenotati={nonPrenotati} onAggiungi={aggiungiPresenza} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <button disabled={busy} onClick={toggleBooking} style={{ flex: 1.3, padding: "13px 4px", borderRadius: 10, cursor: "pointer", fontSize: 12, background: mia ? "transparent" : C.flood, color: mia ? C.flood : "#12200F", border: `2px solid ${C.flood}`, opacity: busy ? 0.6 : 1 }} className="disp">
+          {mia ? "✓ Presente" : "Ci sono!"}
+        </button>
+        <button onClick={() => setPanel(panel === "ospite" ? null : "ospite")} className="disp" style={smallBtn(panel === "ospite")}>+ Ospite</button>
+        <button onClick={() => setPanel(panel === "compagno" ? null : "compagno")} className="disp" style={smallBtn(panel === "compagno")}>+ Compagno</button>
       </div>
+      {mia && <div style={{ fontSize: 11, color: C.mutedFaint, textAlign: "center", marginTop: -12 }}>Tocca "Presente" per annullare</div>}
+      {actionError && <div style={{ fontSize: 12, color: C.danger, textAlign: "center" }}>Errore ({actionError}) — probabile policy INSERT/UPDATE mancante su giocatori_partite.</div>}
+
+      {panel === "ospite" && (
+        <PortaOspiteForm busy={busy} currentUser={currentUser} onPorta={portaOspite} onClose={() => setPanel(null)} />
+      )}
+      {panel === "compagno" && (
+        <PrenotaCompagnoForm busy={busy} nonPrenotati={nonPrenotati} onAggiungi={aggiungiPresenza} onClose={() => setPanel(null)} />
+      )}
 
       <div>
         <div className="disp" style={{ fontSize: 13, color: C.mutedFaint, marginBottom: 8 }}>Prenotati ({prenotazioni.length})</div>
@@ -579,8 +593,7 @@ function HomeTab({ squadre, colorePerSquadra, prenotazioni, titolariIds, contaTi
   );
 }
 
-function PrenotaCompagno({ busy, nonPrenotati, onAggiungi }) {
-  const [open, setOpen] = useState(false);
+function PrenotaCompagnoForm({ busy, nonPrenotati, onAggiungi, onClose }) {
   const opzioni = useMemo(
     () => [...nonPrenotati].sort((a, b) => (a.soprannome || a.nome).localeCompare(b.soprannome || b.nome)).map((g) => ({ id: g.id, label: g.soprannome || g.nome })),
     [nonPrenotati]
@@ -590,14 +603,6 @@ function PrenotaCompagno({ busy, nonPrenotati, onAggiungi }) {
   useEffect(() => {
     if (!opzioni.some((o) => o.id === sel)) setSel(opzioni[0]?.id || "");
   }, [opzioni]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (!open) {
-    return (
-      <button onClick={() => setOpen(true)} className="disp" style={{ padding: "12px 0", borderRadius: 10, border: `1px dashed ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted }}>
-        + Prenota un compagno
-      </button>
-    );
-  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, background: C.surface, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14 }}>
@@ -609,12 +614,12 @@ function PrenotaCompagno({ busy, nonPrenotati, onAggiungi }) {
           <div style={{ flex: 1 }}>
             <SearchableSelect options={opzioni} value={sel} onChange={setSel} placeholder="Cerca giocatore..." />
           </div>
-          <button disabled={busy} onClick={async () => { await onAggiungi(Number(sel)); setOpen(false); }} className="disp" style={{ padding: "0 16px", borderRadius: 8, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", opacity: busy ? 0.6 : 1 }}>
+          <button disabled={busy} onClick={async () => { await onAggiungi(Number(sel)); onClose(); }} className="disp" style={{ padding: "0 16px", borderRadius: 8, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", opacity: busy ? 0.6 : 1 }}>
             Aggiungi
           </button>
         </div>
       )}
-      <button onClick={() => setOpen(false)} className="disp" style={{ padding: "9px 0", borderRadius: 8, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted, fontSize: 11 }}>Annulla</button>
+      <button onClick={onClose} className="disp" style={{ padding: "9px 0", borderRadius: 8, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted, fontSize: 11 }}>Annulla</button>
     </div>
   );
 }
@@ -689,8 +694,7 @@ function ChiudiPartita({ busy, squadre, colorePerSquadra, partita, onChiudi }) {
   );
 }
 
-function PortaOspite({ busy, currentUser, onPorta }) {
-  const [open, setOpen] = useState(false);
+function PortaOspiteForm({ busy, currentUser, onPorta, onClose }) {
   const [nome, setNome] = useState("");
   const [err, setErr] = useState(null);
 
@@ -700,16 +704,8 @@ function PortaOspite({ busy, currentUser, onPorta }) {
     setErr(null);
     await onPorta(nome.trim(), currentUser.id_squadra);
     setNome("");
-    setOpen(false);
+    onClose();
   };
-
-  if (!open) {
-    return (
-      <button onClick={() => setOpen(true)} className="disp" style={{ padding: "12px 0", borderRadius: 10, border: `1px dashed ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted }}>
-        + Porta un ospite
-      </button>
-    );
-  }
 
   return (
     <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 8, background: C.surface, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14 }}>
@@ -718,7 +714,7 @@ function PortaOspite({ busy, currentUser, onPorta }) {
       {err && <div style={{ fontSize: 12, color: C.danger }}>{err}</div>}
       <div style={{ display: "flex", gap: 8 }}>
         <button type="submit" disabled={busy} className="disp" style={{ flex: 1, padding: "11px 0", borderRadius: 8, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", opacity: busy ? 0.6 : 1 }}>Aggiungi</button>
-        <button type="button" onClick={() => setOpen(false)} className="disp" style={{ padding: "11px 16px", borderRadius: 8, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted }}>Annulla</button>
+        <button type="button" onClick={onClose} className="disp" style={{ padding: "11px 16px", borderRadius: 8, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted }}>Annulla</button>
       </div>
     </form>
   );
