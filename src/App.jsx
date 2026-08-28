@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   ShieldCheck, Trophy, Users, Settings, ArrowLeftRight, Star, Flame, Anchor,
-  AlertTriangle, User, X, LogOut, Plus,
+  AlertTriangle, X, LogOut, Plus, KeyRound, UserPlus,
 } from "lucide-react";
 
 // ------------------------------------------------------------------
@@ -10,6 +10,7 @@ import {
 const SUPABASE_URL = "https://jpyqgegristxnbkxjlge.supabase.co";
 const SUPABASE_KEY = "sb_publishable_6fY5cPyvfQFHeVq0_h-65g_IfWQjjhw";
 const LOCAL_KEY = "calcio7_uid";
+const LAST_LOGIN_KEY = "calcio7_last_login_select";
 
 async function sb(path) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -69,10 +70,58 @@ const TABS = [
   { id: "admin", label: "Admin", icon: Settings },
 ];
 
+const RUOLI = ["POR", "DIF", "CEN", "ATT"];
+
 const inputStyle = {
   width: "100%", padding: "10px 12px", borderRadius: 8, border: `1px solid ${C.line}`,
-  background: C.surface2, color: C.chalk, fontSize: 14, fontFamily: "inherit",
+  background: C.surface2, color: C.chalk, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box",
 };
+const labelStyle = { fontSize: 12, color: C.mutedFaint };
+
+// ------------------------------------------------------------------
+// Combobox con ricerca — usato ovunque serve scegliere un giocatore da una lista lunga
+// ------------------------------------------------------------------
+function SearchableSelect({ options, value, onChange, placeholder }) {
+  const selected = options.find((o) => String(o.id) === String(value));
+  const [query, setQuery] = useState(selected?.label || "");
+  const [open, setOpen] = useState(false);
+  const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (!open) {
+      const lbl = options.find((o) => String(o.id) === String(value))?.label;
+      if (lbl !== undefined) setQuery(lbl);
+    }
+  }, [value, open, options]);
+
+  const filtered = options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()));
+
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        value={query}
+        placeholder={placeholder}
+        onFocus={() => setOpen(true)}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onBlur={() => setOpen(false)}
+        style={inputStyle}
+      />
+      {open && filtered.length > 0 && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30, background: C.surface2, border: `1px solid ${C.line}`, borderRadius: 8, maxHeight: 220, overflowY: "auto" }}>
+          {filtered.map((o) => (
+            <div
+              key={o.id}
+              onMouseDown={(e) => { e.preventDefault(); onChange(o.id); setQuery(o.label); setOpen(false); }}
+              style={{ padding: "9px 12px", cursor: "pointer", fontSize: 14, borderBottom: `1px solid ${C.line}` }}
+            >
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ------------------------------------------------------------------
 export default function App() {
@@ -194,7 +243,16 @@ export default function App() {
   const salvaProfilo = (nome, soprannome) =>
     withBusy(async () => {
       await sbWrite(`giocatori?id=eq.${currentUser.id}`, "PATCH", { nome, soprannome });
-      setShowProfile(false);
+    });
+
+  const cambiaPin = (nuovoPin) =>
+    withBusy(async () => {
+      await sbWrite(`giocatori?id=eq.${currentUser.id}`, "PATCH", { pin: nuovoPin });
+    });
+
+  const creaGiocatore = (dati) =>
+    withBusy(async () => {
+      await sbWrite("giocatori", "POST", { ...dati, is_admin: false });
     });
 
   const showLoginGate = !loading && !error && giocatori.length > 0 && !currentUser;
@@ -261,6 +319,7 @@ export default function App() {
                   prenotazioni={prenotazioni} titolariIds={titolariIds} partita={partita}
                   currentUser={currentUser} busy={busy} actionError={actionError}
                   aggiungiPresenza={aggiungiPresenza} rimuoviPresenza={rimuoviPresenza} spostaSquadra={spostaSquadra}
+                  creaGiocatore={creaGiocatore}
                 />
               )}
             </>
@@ -283,7 +342,7 @@ export default function App() {
         )}
 
         {showProfile && currentUser && (
-          <ProfileModal currentUser={currentUser} busy={busy} actionError={actionError} onSave={salvaProfilo} onLogout={handleLogout} onClose={() => setShowProfile(false)} />
+          <ProfileModal currentUser={currentUser} busy={busy} actionError={actionError} onSaveProfilo={salvaProfilo} onCambiaPin={cambiaPin} onLogout={handleLogout} onClose={() => setShowProfile(false)} />
         )}
       </div>
     </div>
@@ -292,10 +351,21 @@ export default function App() {
 
 // ------------------------------------------------------------------
 function LoginScreen({ giocatori, onLogin }) {
-  const ordinati = [...giocatori].sort((a, b) => a.nome.localeCompare(b.nome));
-  const [selId, setSelId] = useState(ordinati[0]?.id || "");
+  const opzioni = useMemo(
+    () => [...giocatori].sort((a, b) => a.nome.localeCompare(b.nome)).map((g) => ({ id: g.id, label: g.soprannome || g.nome })),
+    [giocatori]
+  );
+  const [selId, setSelId] = useState(() => {
+    const saved = localStorage.getItem(LAST_LOGIN_KEY);
+    return saved && giocatori.some((g) => String(g.id) === saved) ? saved : opzioni[0]?.id || "";
+  });
   const [pin, setPin] = useState("");
   const [err, setErr] = useState(null);
+
+  const selectPlayer = (id) => {
+    setSelId(id);
+    localStorage.setItem(LAST_LOGIN_KEY, id);
+  };
 
   const submit = (e) => {
     e.preventDefault();
@@ -311,13 +381,9 @@ function LoginScreen({ giocatori, onLogin }) {
     <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14, paddingTop: 20 }}>
       <div>
         <div className="disp" style={{ fontSize: 22 }}>Chi sei?</div>
-        <div style={{ fontSize: 13, color: C.mutedFaint, marginTop: 4 }}>Seleziona il tuo nome e inserisci il tuo PIN a 4 cifre.</div>
+        <div style={{ fontSize: 13, color: C.mutedFaint, marginTop: 4 }}>Cerca il tuo nome e inserisci il tuo PIN a 4 cifre.</div>
       </div>
-      <select value={selId} onChange={(e) => setSelId(e.target.value)} style={inputStyle}>
-        {ordinati.map((g) => (
-          <option key={g.id} value={g.id}>{g.soprannome || g.nome}</option>
-        ))}
-      </select>
+      <SearchableSelect options={opzioni} value={selId} onChange={selectPlayer} placeholder="Cerca il tuo nome..." />
       <input
         type="password" inputMode="numeric" maxLength={4} placeholder="PIN" value={pin}
         onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} style={inputStyle}
@@ -330,29 +396,81 @@ function LoginScreen({ giocatori, onLogin }) {
   );
 }
 
-function ProfileModal({ currentUser, busy, actionError, onSave, onLogout, onClose }) {
+function ProfileModal({ currentUser, busy, actionError, onSaveProfilo, onCambiaPin, onLogout, onClose }) {
   const [nome, setNome] = useState(currentUser.nome || "");
   const [soprannome, setSoprannome] = useState(currentUser.soprannome || "");
+  const [savedMsg, setSavedMsg] = useState(false);
+
+  const [showPin, setShowPin] = useState(false);
+  const [pinAttuale, setPinAttuale] = useState("");
+  const [pinNuovo, setPinNuovo] = useState("");
+  const [pinErr, setPinErr] = useState(null);
+  const [pinOk, setPinOk] = useState(false);
+
+  const salvaProfiloClick = async () => {
+    await onSaveProfilo(nome, soprannome);
+    setSavedMsg(true);
+    setTimeout(() => setSavedMsg(false), 2000);
+  };
+
+  const cambiaPinClick = async () => {
+    setPinErr(null);
+    if (String(currentUser.pin) !== pinAttuale.trim()) {
+      setPinErr("Il PIN attuale non è corretto.");
+      return;
+    }
+    if (pinNuovo.trim().length !== 4) {
+      setPinErr("Il nuovo PIN deve avere 4 cifre.");
+      return;
+    }
+    await onCambiaPin(pinNuovo.trim());
+    setPinOk(true);
+    setPinAttuale("");
+    setPinNuovo("");
+    setTimeout(() => { setPinOk(false); setShowPin(false); }, 1500);
+  };
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 50 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: C.surface, borderRadius: "16px 16px 0 0", padding: 20, border: `1px solid ${C.line}`, display: "flex", flexDirection: "column", gap: 14 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, maxHeight: "85vh", overflowY: "auto", background: C.surface, borderRadius: "16px 16px 0 0", padding: 20, border: `1px solid ${C.line}`, display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="disp" style={{ fontSize: 18 }}>Il tuo profilo</div>
           <button onClick={onClose} aria-label="Chiudi" style={{ background: "none", border: "none", color: C.mutedFaint, cursor: "pointer" }}><X size={20} /></button>
         </div>
 
-        <label style={{ fontSize: 12, color: C.mutedFaint }}>Nome</label>
+        <label style={labelStyle}>Nome</label>
         <input value={nome} onChange={(e) => setNome(e.target.value)} style={{ ...inputStyle, marginTop: -8 }} />
 
-        <label style={{ fontSize: 12, color: C.mutedFaint }}>Soprannome</label>
+        <label style={labelStyle}>Soprannome</label>
         <input value={soprannome} onChange={(e) => setSoprannome(e.target.value)} style={{ ...inputStyle, marginTop: -8 }} />
 
         {actionError && <div style={{ fontSize: 12, color: C.danger }}>Errore nel salvataggio ({actionError}).</div>}
+        {savedMsg && <div style={{ fontSize: 12, color: C.flood }}>Salvato ✓</div>}
 
-        <button disabled={busy} onClick={() => onSave(nome, soprannome)} className="disp" style={{ padding: "13px 0", borderRadius: 10, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", opacity: busy ? 0.6 : 1 }}>
-          Salva
+        <button disabled={busy} onClick={salvaProfiloClick} className="disp" style={{ padding: "13px 0", borderRadius: 10, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", opacity: busy ? 0.6 : 1 }}>
+          Salva profilo
         </button>
+
+        <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 14 }}>
+          <button onClick={() => setShowPin((v) => !v)} className="disp" style={{ padding: "12px 0", width: "100%", borderRadius: 10, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            <KeyRound size={15} /> Cambia PIN
+          </button>
+
+          {showPin && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
+              <label style={labelStyle}>PIN attuale</label>
+              <input type="password" inputMode="numeric" maxLength={4} value={pinAttuale} onChange={(e) => setPinAttuale(e.target.value.replace(/\D/g, ""))} style={{ ...inputStyle, marginTop: -6 }} />
+              <label style={labelStyle}>Nuovo PIN (4 cifre)</label>
+              <input type="password" inputMode="numeric" maxLength={4} value={pinNuovo} onChange={(e) => setPinNuovo(e.target.value.replace(/\D/g, ""))} style={{ ...inputStyle, marginTop: -6 }} />
+              {pinErr && <div style={{ fontSize: 12, color: C.danger }}>{pinErr}</div>}
+              {pinOk && <div style={{ fontSize: 12, color: C.flood }}>PIN aggiornato ✓</div>}
+              <button disabled={busy} onClick={cambiaPinClick} className="disp" style={{ padding: "11px 0", borderRadius: 10, border: "none", cursor: "pointer", background: C.surface2, color: C.chalk, opacity: busy ? 0.6 : 1 }}>
+                Conferma nuovo PIN
+              </button>
+            </div>
+          )}
+        </div>
+
         <button onClick={onLogout} className="disp" style={{ padding: "12px 0", borderRadius: 10, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
           <LogOut size={15} /> Esci
         </button>
@@ -407,26 +525,39 @@ function HomeTab({ squadre, colorePerSquadra, prenotazioni, titolariIds, contaTi
         {prenotazioni.length === 0 ? (
           <div style={{ fontSize: 13, color: C.mutedFaint, padding: "16px 0" }}>Nessuno si è ancora prenotato per questa partita.</div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {prenotazioni.map((p) => {
+          <ColonnePerSquadra squadre={squadre} colorePerSquadra={colorePerSquadra} prenotazioni={prenotazioni} titolariIds={titolariIds} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Lista dei prenotati divisa in due colonne affiancate, una per squadra
+function ColonnePerSquadra({ squadre, colorePerSquadra, prenotazioni, titolariIds }) {
+  return (
+    <div style={{ display: "flex", gap: 8 }}>
+      {squadre.map((sq) => {
+        const dellaSquadra = prenotazioni.filter((p) => p.id_squadra === sq.id);
+        return (
+          <div key={sq.id} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+            <div className="disp" style={{ fontSize: 11, color: colorePerSquadra[sq.id], marginBottom: 2 }}>{sq.nome} ({dellaSquadra.length})</div>
+            {dellaSquadra.length === 0 && <div style={{ fontSize: 12, color: C.mutedFaint }}>—</div>}
+            {dellaSquadra.map((p) => {
               const titolare = titolariIds.has(p.id_giocatore);
               const g = p.giocatori;
               return (
-                <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}`, opacity: titolare ? 1 : 0.55 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: colorePerSquadra[p.id_squadra] }} />
-                    <div>
-                      <div style={{ fontSize: 14 }}>{g?.soprannome || g?.nome}</div>
-                      <div style={{ fontSize: 11, color: C.mutedFaint }}>{g?.ruolo}</div>
-                    </div>
+                <div key={p.id} style={{ padding: "8px 10px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}`, opacity: titolare ? 1 : 0.55, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g?.soprannome || g?.nome}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 }}>
+                    <span style={{ fontSize: 10, color: C.mutedFaint }}>{g?.ruolo}</span>
+                    <span className="disp" style={{ fontSize: 9, color: titolare ? C.flood : C.mutedFaint }}>{titolare ? "TIT" : "RIS"}</span>
                   </div>
-                  <div className="disp" style={{ fontSize: 10, color: titolare ? C.flood : C.mutedFaint }}>{titolare ? "TITOLARE" : "RISERVA"}</div>
                 </div>
               );
             })}
           </div>
-        )}
-      </div>
+        );
+      })}
     </div>
   );
 }
@@ -467,10 +598,80 @@ function StatsTab() {
   );
 }
 
-function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolariIds, partita, currentUser, busy, actionError, aggiungiPresenza, rimuoviPresenza, spostaSquadra }) {
+function NuovoGiocatoreForm({ squadre, busy, onCrea }) {
+  const [open, setOpen] = useState(false);
+  const [nome, setNome] = useState("");
+  const [soprannome, setSoprannome] = useState("");
+  const [telefono, setTelefono] = useState("");
+  const [ruolo, setRuolo] = useState("CEN");
+  const [forza, setForza] = useState(6);
+  const [idSquadra, setIdSquadra] = useState(squadre[0]?.id || "");
+  const [pin, setPin] = useState(() => String(Math.floor(1000 + Math.random() * 9000)));
+  const [err, setErr] = useState(null);
+  const [ok, setOk] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErr(null);
+    if (!nome.trim() || !telefono.trim()) {
+      setErr("Nome e telefono sono obbligatori.");
+      return;
+    }
+    try {
+      await onCrea({
+        nome: nome.trim(), soprannome: soprannome.trim() || null, telefono: telefono.trim(),
+        ruolo, forza: Number(forza), id_squadra: Number(idSquadra), pin,
+      });
+      setOk(true);
+      setNome(""); setSoprannome(""); setTelefono("");
+      setPin(String(Math.floor(1000 + Math.random() * 9000)));
+      setTimeout(() => setOk(false), 2000);
+    } catch (e2) {
+      setErr(e2.message);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="disp" style={{ padding: "13px 0", borderRadius: 10, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+        <UserPlus size={15} /> Aggiungi compagno
+      </button>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 8, background: C.surface, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14 }}>
+      <div className="disp" style={{ fontSize: 13, color: C.mutedFaint }}>Nuovo compagno</div>
+      <input placeholder="Nome e cognome" value={nome} onChange={(e) => setNome(e.target.value)} style={inputStyle} />
+      <input placeholder="Soprannome (opzionale)" value={soprannome} onChange={(e) => setSoprannome(e.target.value)} style={inputStyle} />
+      <input placeholder="Telefono" value={telefono} onChange={(e) => setTelefono(e.target.value)} style={inputStyle} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <select value={ruolo} onChange={(e) => setRuolo(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
+          {RUOLI.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <input type="number" min={1} max={10} value={forza} onChange={(e) => setForza(e.target.value)} style={{ ...inputStyle, width: 70 }} />
+        <select value={idSquadra} onChange={(e) => setIdSquadra(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
+          {squadre.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}
+        </select>
+      </div>
+      <div style={{ fontSize: 11, color: C.mutedFaint }}>PIN iniziale: <span className="num" style={{ color: C.flood }}>{pin}</span> — comunicalo al giocatore, potrà cambiarlo dal suo profilo.</div>
+      {err && <div style={{ fontSize: 12, color: C.danger }}>{err}</div>}
+      {ok && <div style={{ fontSize: 12, color: C.flood }}>Giocatore aggiunto ✓</div>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button type="submit" disabled={busy} className="disp" style={{ flex: 1, padding: "11px 0", borderRadius: 8, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", opacity: busy ? 0.6 : 1 }}>Salva</button>
+        <button type="button" onClick={() => setOpen(false)} className="disp" style={{ padding: "11px 16px", borderRadius: 8, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted }}>Annulla</button>
+      </div>
+    </form>
+  );
+}
+
+function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolariIds, partita, currentUser, busy, actionError, aggiungiPresenza, rimuoviPresenza, spostaSquadra, creaGiocatore }) {
   const titolari = prenotazioni.filter((p) => titolariIds.has(p.id_giocatore));
   const riserve = prenotazioni.filter((p) => !titolariIds.has(p.id_giocatore));
-  const nonPrenotati = giocatori.filter((g) => !prenotazioni.some((p) => p.id_giocatore === g.id));
+  const nonPrenotati = useMemo(
+    () => [...giocatori].filter((g) => !prenotazioni.some((p) => p.id_giocatore === g.id)).sort((a, b) => a.nome.localeCompare(b.nome)),
+    [giocatori, prenotazioni]
+  );
   const [daAggiungere, setDaAggiungere] = useState(nonPrenotati[0]?.id || "");
 
   if (!currentUser.is_admin) {
@@ -491,12 +692,15 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
       {actionError && <div style={{ fontSize: 12, color: C.danger }}>Errore ({actionError}) — controlla le policy INSERT/UPDATE su giocatori_partite.</div>}
 
       {partita && nonPrenotati.length > 0 && (
-        <div style={{ display: "flex", gap: 8 }}>
-          <select value={daAggiungere} onChange={(e) => setDaAggiungere(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
-            {nonPrenotati.map((g) => (
-              <option key={g.id} value={g.id}>{g.soprannome || g.nome}</option>
-            ))}
-          </select>
+        <div style={{ display: "flex", gap: 8, position: "relative" }}>
+          <div style={{ flex: 1 }}>
+            <SearchableSelect
+              options={nonPrenotati.map((g) => ({ id: g.id, label: g.soprannome || g.nome }))}
+              value={daAggiungere}
+              onChange={setDaAggiungere}
+              placeholder="Cerca giocatore..."
+            />
+          </div>
           <button disabled={busy} onClick={() => aggiungiPresenza(Number(daAggiungere))} className="disp" style={{ padding: "0 16px", borderRadius: 8, border: "none", cursor: "pointer", background: C.flood, color: "#12200F", display: "flex", alignItems: "center", gap: 6, opacity: busy ? 0.6 : 1 }}>
             <Plus size={16} /> Aggiungi
           </button>
@@ -551,6 +755,8 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
 
       <AnagraficaLista giocatori={giocatori} colorePerSquadra={colorePerSquadra} />
 
+      <NuovoGiocatoreForm squadre={squadre} busy={busy} onCrea={creaGiocatore} />
+
       <button style={{ padding: "14px 0", borderRadius: 12, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted }} className="disp">
         + Nuova partita
       </button>
@@ -559,11 +765,12 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
 }
 
 function AnagraficaLista({ giocatori, colorePerSquadra }) {
+  const ordinati = useMemo(() => [...giocatori].sort((a, b) => a.nome.localeCompare(b.nome)), [giocatori]);
   return (
     <div>
-      <div className="disp" style={{ fontSize: 13, color: C.mutedFaint, marginBottom: 8 }}>Anagrafica giocatori ({giocatori.length})</div>
+      <div className="disp" style={{ fontSize: 13, color: C.mutedFaint, marginBottom: 8 }}>Anagrafica giocatori ({ordinati.length})</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {giocatori.map((g) => (
+        {ordinati.map((g) => (
           <div key={g.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div style={{ width: 6, height: 6, borderRadius: "50%", background: colorePerSquadra[g.id_squadra] }} />
