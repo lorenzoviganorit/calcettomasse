@@ -282,6 +282,19 @@ export default function App() {
       await sbWrite(`giocatori_partite?id=eq.${prenotazioneId}`, "PATCH", { id_squadra: nuovaSquadraId });
     });
 
+  // Cambio squadra permanente in anagrafica (diverso dal prestito per una singola partita).
+  // Se il numero di maglia entra in conflitto nella nuova squadra, lo azzera: andrà reimpostato.
+  const spostaSquadraGiocatore = (idGiocatore, nuovaSquadraId) =>
+    withBusy(async () => {
+      const g = giocatori.find((x) => x.id === idGiocatore);
+      const conflitto = g?.numero_maglia != null && giocatori.some(
+        (x) => x.id !== idGiocatore && x.id_squadra === nuovaSquadraId && x.numero_maglia === g.numero_maglia
+      );
+      const patch = { id_squadra: nuovaSquadraId };
+      if (conflitto) patch.numero_maglia = null;
+      await sbWrite(`giocatori?id=eq.${idGiocatore}`, "PATCH", patch);
+    });
+
   const chiudiPartita = (golPerSquadra, nuovaData) =>
     withBusy(async () => {
       await sbWrite(`partite?id=eq.${partita.id}`, "PATCH", {
@@ -439,7 +452,7 @@ export default function App() {
                   prenotazioni={prenotazioni} titolariIds={titolariIds} partita={partita}
                   currentUser={currentUser} busy={busy} actionError={actionError}
                   rimuoviPresenza={rimuoviPresenza} spostaSquadra={spostaSquadra}
-                  creaGiocatore={creaGiocatore}
+                  creaGiocatore={creaGiocatore} spostaSquadraGiocatore={spostaSquadraGiocatore}
                 />
               )}
             </>
@@ -1291,7 +1304,7 @@ function SuggerisciFormazione({ prenotazioni, titolariIds, squadre, colorePerSqu
   );
 }
 
-function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolariIds, partita, currentUser, busy, actionError, rimuoviPresenza, spostaSquadra, creaGiocatore }) {
+function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolariIds, partita, currentUser, busy, actionError, rimuoviPresenza, spostaSquadra, creaGiocatore, spostaSquadraGiocatore }) {
   const titolari = prenotazioni.filter((p) => titolariIds.has(p.id));
   const riserve = prenotazioni.filter((p) => !titolariIds.has(p.id));
 
@@ -1362,7 +1375,7 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
         </div>
       </Collassabile>
 
-      <AnagraficaLista giocatori={giocatori} colorePerSquadra={colorePerSquadra} />
+      <AnagraficaLista giocatori={giocatori} colorePerSquadra={colorePerSquadra} squadre={squadre} busy={busy} onSpostaSquadra={spostaSquadraGiocatore} />
 
       <NuovoGiocatoreForm squadre={squadre} busy={busy} onCrea={creaGiocatore} />
 
@@ -1373,23 +1386,39 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
   );
 }
 
-function AnagraficaLista({ giocatori, colorePerSquadra }) {
+function AnagraficaLista({ giocatori, colorePerSquadra, squadre, busy, onSpostaSquadra }) {
   const ordinati = useMemo(() => [...giocatori].sort((a, b) => (a.soprannome || a.nome).localeCompare(b.soprannome || b.nome)), [giocatori]);
   return (
     <Collassabile titolo={`Anagrafica Giocatori (${ordinati.length})`} defaultAperto={false}>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {ordinati.map((g) => (
-          <div key={g.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}` }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 6, height: 6, borderRadius: "50%", background: colorePerSquadra[g.id_squadra] }} />
-              <span style={{ fontSize: 14 }}>
-                {g.numero_maglia != null && <span className="num" style={{ color: C.mutedFaint }}>#{g.numero_maglia} </span>}
-                {g.soprannome || g.nome} <span style={{ color: C.mutedFaint, fontSize: 11 }}>({g.ruolo} · {g.forza})</span>
-              </span>
+        {ordinati.map((g) => {
+          const altraSquadra = squadre?.find((s) => s.id !== g.id_squadra);
+          return (
+            <div key={g.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: colorePerSquadra[g.id_squadra] }} />
+                <span style={{ fontSize: 14 }}>
+                  {g.numero_maglia != null && <span className="num" style={{ color: C.mutedFaint }}>#{g.numero_maglia} </span>}
+                  {g.soprannome || g.nome} <span style={{ color: C.mutedFaint, fontSize: 11 }}>({g.ruolo} · {g.forza})</span>
+                </span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {g.is_admin && <span className="disp" style={{ fontSize: 9, color: C.flood }}>ADMIN</span>}
+                {onSpostaSquadra && altraSquadra && (
+                  <button
+                    disabled={busy}
+                    onClick={() => onSpostaSquadra(g.id, altraSquadra.id)}
+                    aria-label={`Sposta in ${altraSquadra.nome}`}
+                    title={`Sposta in ${altraSquadra.nome}`}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: C.mutedFaint, padding: 4 }}
+                  >
+                    <ArrowLeftRight size={15} />
+                  </button>
+                )}
+              </div>
             </div>
-            {g.is_admin && <span className="disp" style={{ fontSize: 9, color: C.flood }}>ADMIN</span>}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </Collassabile>
   );
