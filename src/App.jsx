@@ -1217,8 +1217,11 @@ function assegnaFormazione(giocatoriSquadra, target = MODULI["3-2-1"]) {
 function distribuisciX(n, centro = 190, ampiezza = 110) {
   if (n <= 0) return [];
   if (n === 1) return [centro];
-  const step = (ampiezza * 2) / (n - 1);
-  return Array.from({ length: n }, (_, i) => centro - ampiezza + i * step);
+  // Con 2 giocatori li tengo più vicini al centro (a metà strada tra il centrale e
+  // l'esterno di una riga da 3), invece di piazzarli esattamente sui due estremi.
+  const ampiezzaEffettiva = n === 2 ? ampiezza / 2 : ampiezza;
+  const step = (ampiezzaEffettiva * 2) / (n - 1);
+  return Array.from({ length: n }, (_, i) => centro - ampiezzaEffettiva + i * step);
 }
 
 function CampoFormazione({ basso, alto, colorePerSquadra, selezionato, onClickGiocatore }) {
