@@ -697,10 +697,15 @@ function Scoreboard({ squadre, colorePerSquadra, contaTitolari }) {
     <div style={{ background: C.surface, borderRadius: 14, padding: 18, border: `1px solid ${C.line}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 12 }}>
         {squadre.map((sq) => (
-          <div key={sq.id}>
-            <div className="disp" style={{ fontSize: 14, color: colorePerSquadra[sq.id] }}>{sq.nome}</div>
-            <div className="num" style={{ fontSize: 30, lineHeight: 1 }}>
-              {contaTitolari(sq.id)}<span style={{ fontSize: 16, color: C.mutedFaint }}>/7</span>
+          <div key={sq.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {LOGO_SQUADRA[sq.nome] && (
+              <img src={LOGO_SQUADRA[sq.nome]} alt={sq.nome} style={{ width: 34, height: 34, objectFit: "contain", borderRadius: 6 }} />
+            )}
+            <div>
+              <div className="disp" style={{ fontSize: 14, color: colorePerSquadra[sq.id] }}>{sq.nome}</div>
+              <div className="num" style={{ fontSize: 30, lineHeight: 1 }}>
+                {contaTitolari(sq.id)}<span style={{ fontSize: 16, color: C.mutedFaint }}>/7</span>
+              </div>
             </div>
           </div>
         ))}
