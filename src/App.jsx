@@ -1387,37 +1387,49 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
 }
 
 function AnagraficaLista({ giocatori, colorePerSquadra, squadre, busy, onSpostaSquadra, actionError }) {
-  const ordinati = useMemo(() => [...giocatori].sort((a, b) => (a.soprannome || a.nome).localeCompare(b.soprannome || b.nome)), [giocatori]);
+  const ordina = (arr) => [...arr].sort((a, b) => (a.soprannome || a.nome).localeCompare(b.soprannome || b.nome));
+
+  const RigaGiocatore = ({ g }) => {
+    const altraSquadra = squadre?.find((s) => s.id !== g.id_squadra);
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}` }}>
+        <span style={{ fontSize: 14 }}>
+          {g.numero_maglia != null && <span className="num" style={{ color: C.mutedFaint }}>#{g.numero_maglia} </span>}
+          {g.soprannome || g.nome} <span style={{ color: C.mutedFaint, fontSize: 11 }}>({g.ruolo} · {g.forza})</span>
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {g.is_admin && <span className="disp" style={{ fontSize: 9, color: C.flood }}>ADMIN</span>}
+          {onSpostaSquadra && altraSquadra && (
+            <button
+              disabled={busy}
+              onClick={() => onSpostaSquadra(g.id, altraSquadra.id)}
+              aria-label={`Sposta in ${altraSquadra.nome}`}
+              title={`Sposta in ${altraSquadra.nome}`}
+              style={{ background: "none", border: "none", cursor: "pointer", color: C.mutedFaint, padding: 4 }}
+            >
+              <ArrowLeftRight size={15} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <Collassabile titolo={`Anagrafica Giocatori (${ordinati.length})`} defaultAperto={false}>
+    <Collassabile titolo={`Anagrafica Giocatori (${giocatori.length})`} defaultAperto={false}>
       {onSpostaSquadra && actionError && (
         <div style={{ fontSize: 12, color: C.danger, marginBottom: 8 }}>Errore ({actionError}) — probabile policy mancante su "giocatori" (UPDATE).</div>
       )}
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {ordinati.map((g) => {
-          const altraSquadra = squadre?.find((s) => s.id !== g.id_squadra);
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {(squadre && squadre.length > 0 ? squadre : [null]).map((sq) => {
+          const dellaSquadra = ordina(sq ? giocatori.filter((g) => g.id_squadra === sq.id) : giocatori);
           return (
-            <div key={g.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}` }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ width: 6, height: 6, borderRadius: "50%", background: colorePerSquadra[g.id_squadra] }} />
-                <span style={{ fontSize: 14 }}>
-                  {g.numero_maglia != null && <span className="num" style={{ color: C.mutedFaint }}>#{g.numero_maglia} </span>}
-                  {g.soprannome || g.nome} <span style={{ color: C.mutedFaint, fontSize: 11 }}>({g.ruolo} · {g.forza})</span>
-                </span>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {g.is_admin && <span className="disp" style={{ fontSize: 9, color: C.flood }}>ADMIN</span>}
-                {onSpostaSquadra && altraSquadra && (
-                  <button
-                    disabled={busy}
-                    onClick={() => onSpostaSquadra(g.id, altraSquadra.id)}
-                    aria-label={`Sposta in ${altraSquadra.nome}`}
-                    title={`Sposta in ${altraSquadra.nome}`}
-                    style={{ background: "none", border: "none", cursor: "pointer", color: C.mutedFaint, padding: 4 }}
-                  >
-                    <ArrowLeftRight size={15} />
-                  </button>
-                )}
+            <div key={sq?.id ?? "tutti"}>
+              {sq && (
+                <div className="disp" style={{ fontSize: 11, color: colorePerSquadra[sq.id], marginBottom: 6 }}>{sq.nome} ({dellaSquadra.length})</div>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {dellaSquadra.map((g) => <RigaGiocatore key={g.id} g={g} />)}
               </div>
             </div>
           );
