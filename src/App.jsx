@@ -147,6 +147,7 @@ export default function App() {
   const [partita, setPartita] = useState(null);
   const [prenotazioni, setPrenotazioni] = useState([]);
   const [storico, setStorico] = useState([]);
+  const [votiStorico, setVotiStorico] = useState([]);
   const [richiestePin, setRichiestePin] = useState([]);
   const [currentUserId, setCurrentUserId] = useState(() => localStorage.getItem(LOCAL_KEY) || null);
   const [showProfile, setShowProfile] = useState(false);
@@ -169,11 +170,16 @@ export default function App() {
           `giocatori_partite?select=*,giocatori(*)&id_partita=eq.${part[0].id}&flag_annullamento=eq.false&order=data_prenotazione.asc`
         );
       }
+      let voti = [];
+      if (storicoData.length > 0) {
+        voti = await sb(`voti_mvp?select=*,giocatori(*)&id_partita=in.(${storicoData.map((p) => p.id).join(",")})`);
+      }
       setSquadre(sq);
       setGiocatori(gio);
       setPartita(part[0] || null);
       setPrenotazioni(pren);
       setStorico(storicoData);
+      setVotiStorico(voti);
       setRichiestePin(richieste);
     } catch (e) {
       setError(e.message);
@@ -442,7 +448,7 @@ export default function App() {
               {tab === "stats" && (
                 <StatsTab
                   squadre={squadre} colorePerSquadra={colorePerSquadra} storico={storico}
-                  currentUser={currentUser} busy={busy}
+                  currentUser={currentUser} busy={busy} votiStorico={votiStorico}
                   caricaDettaglioPartita={caricaDettaglioPartita} votaMvp={votaMvp}
                 />
               )}
@@ -940,7 +946,7 @@ const LOGO_SQUADRA = {
   "Barcellotto": "/logos/barcellotto.jpg",
 };
 
-function StatsTab({ squadre, colorePerSquadra, storico, currentUser, busy, caricaDettaglioPartita, votaMvp }) {
+function StatsTab({ squadre, colorePerSquadra, storico, currentUser, busy, votiStorico, caricaDettaglioPartita, votaMvp }) {
   const [mostraTutti, setMostraTutti] = useState(false);
   const [partitaAperta, setPartitaAperta] = useState(null); // riga di `storico` selezionata
 
@@ -954,6 +960,29 @@ function StatsTab({ squadre, colorePerSquadra, storico, currentUser, busy, caric
     });
     return conteggio;
   }, [storico, squadre]);
+
+  // Per ogni partita: chi è in testa ai voti MVP e se io ho già votato
+  const mvpPerPartita = useMemo(() => {
+    const mappa = {};
+    storico.forEach((p) => {
+      const votiPartita = votiStorico.filter((v) => v.id_partita === p.id);
+      const conteggi = {};
+      votiPartita.forEach((v) => {
+        conteggi[v.id_giocatore] = (conteggi[v.id_giocatore] || 0) + 1;
+      });
+      let leaderId = null, maxVoti = 0;
+      Object.entries(conteggi).forEach(([id, n]) => {
+        if (n > maxVoti) { maxVoti = n; leaderId = Number(id); }
+      });
+      const leaderVoto = votiPartita.find((v) => v.id_giocatore === leaderId);
+      mappa[p.id] = {
+        leaderNome: leaderVoto?.giocatori?.soprannome || leaderVoto?.giocatori?.nome || null,
+        maxVoti,
+        hoVotato: votiPartita.some((v) => v.id_votante === currentUser.id),
+      };
+    });
+    return mappa;
+  }, [storico, votiStorico, currentUser]);
 
   const daMostrare = mostraTutti ? storico : storico.slice(0, 3);
 
@@ -979,18 +1008,33 @@ function StatsTab({ squadre, colorePerSquadra, storico, currentUser, busy, caric
           <div style={{ fontSize: 13, color: C.mutedFaint }}>Nessuna partita giocata ancora.</div>
         ) : (
           <>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {daMostrare.map((p) => {
                 const sq1 = squadre.find((s) => s.id === p.id_squadra_1);
                 const sq2 = squadre.find((s) => s.id === p.id_squadra_2);
+                const mvp = mvpPerPartita[p.id];
                 return (
-                  <button key={p.id} onClick={() => setPartitaAperta(p)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}`, cursor: "pointer", textAlign: "left" }}>
-                    <span style={{ fontSize: 12, color: C.mutedFaint }}>{new Date(p.data_partita).toLocaleDateString("it-IT", { day: "numeric", month: "short" })}</span>
-                    <span className="num" style={{ fontSize: 15 }}>
-                      <span style={{ color: sq1 ? colorePerSquadra[sq1.id] : C.chalk }}>{p.gol_squadra_1}</span>
-                      {" — "}
-                      <span style={{ color: sq2 ? colorePerSquadra[sq2.id] : C.chalk }}>{p.gol_squadra_2}</span>
-                    </span>
+                  <button key={p.id} onClick={() => setPartitaAperta(p)} style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px", background: C.surface, borderRadius: 10, border: `1px solid ${C.line}`, cursor: "pointer", textAlign: "left" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: 12, color: C.mutedFaint }}>{new Date(p.data_partita).toLocaleDateString("it-IT", { day: "numeric", month: "short" })}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {LOGO_SQUADRA[sq1?.nome] && <img src={LOGO_SQUADRA[sq1.nome]} alt={sq1.nome} style={{ width: 20, height: 20, objectFit: "contain" }} />}
+                        <span className="num" style={{ fontSize: 15 }}>
+                          <span style={{ color: sq1 ? colorePerSquadra[sq1.id] : C.chalk }}>{p.gol_squadra_1}</span>
+                          {" — "}
+                          <span style={{ color: sq2 ? colorePerSquadra[sq2.id] : C.chalk }}>{p.gol_squadra_2}</span>
+                        </span>
+                        {LOGO_SQUADRA[sq2?.nome] && <img src={LOGO_SQUADRA[sq2.nome]} alt={sq2.nome} style={{ width: 20, height: 20, objectFit: "contain" }} />}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${C.line}`, paddingTop: 8 }}>
+                      <span style={{ fontSize: 11, color: C.mutedFaint }}>
+                        {mvp?.leaderNome ? <>🏆 MVP: <span style={{ color: C.flood }}>{mvp.leaderNome}</span> ({mvp.maxVoti} voti)</> : "Nessun voto MVP ancora"}
+                      </span>
+                      {!mvp?.hoVotato && (
+                        <span className="disp" style={{ fontSize: 10, color: "#12200F", background: C.flood, padding: "3px 8px", borderRadius: 6 }}>Vota</span>
+                      )}
+                    </div>
                   </button>
                 );
               })}
