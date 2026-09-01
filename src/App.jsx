@@ -1223,14 +1223,18 @@ function distribuisciX(n, centro = 190, ampiezza = 110) {
 
 function CampoFormazione({ basso, alto, colorePerSquadra, selezionato, onClickGiocatore }) {
   const W = 380, H = 560;
-  const yBasso = { POR: 522, DIF: 424, CEN: 322, ATT: 226 };
-  const yAlto = { POR: 38, DIF: 136, CEN: 238, ATT: 334 };
+  // Ogni squadra resta interamente nella propria metà campo — evita che le righe
+  // si sovrappongano quando i due moduli sono diversi (es. 3-2-1 contro 2-3-1)
+  const yAlto = { POR: 64, DIF: 132, CEN: 196, ATT: 252 };
+  const yBasso = { POR: 496, DIF: 428, CEN: 364, ATT: 308 };
   const etichetta = { POR: "P", DIF: "D", CEN: "CEN", ATT: "ATT" };
 
   const renderRuolo = (arr, ruolo, y, colore, squadraKey, idSquadra) => {
     const xs = distribuisciX(arr.length);
     return arr.map((g, i) => {
       const isSelezionato = selezionato && selezionato.squadraKey === squadraKey && selezionato.giocatoreId === g.id;
+      const nomeVisibile = g.soprannome || g.nome || "";
+      const largNome = Math.min(76, Math.max(30, nomeVisibile.length * 6.4));
       return (
         <g
           key={`${idSquadra}-${g.id}`}
@@ -1238,9 +1242,10 @@ function CampoFormazione({ basso, alto, colorePerSquadra, selezionato, onClickGi
           onClick={() => onClickGiocatore(squadraKey, ruolo, g.id)}
           style={{ cursor: "pointer" }}
         >
+          <rect x={-largNome / 2} y="22" width={largNome} height="14" rx="4" fill="#0E1F17" opacity="0.8" />
           <circle r="17" fill={colore} stroke={isSelezionato ? "#F3F1E7" : "#0E1F17"} strokeWidth={isSelezionato ? 3 : 2} />
           <text textAnchor="middle" dy="5" fontSize="13" fontWeight="700" fill="#0E1F17" fontFamily="'Oswald', sans-serif">{g.numero_maglia ?? "-"}</text>
-          <text textAnchor="middle" y="31" fontSize="10.5" fill="#F3F1E7" fontFamily="'Work Sans', sans-serif">{g.soprannome || g.nome}</text>
+          <text textAnchor="middle" y="32" fontSize="10.5" fill="#F3F1E7" fontFamily="'Work Sans', sans-serif">{nomeVisibile}</text>
         </g>
       );
     });
@@ -1287,8 +1292,6 @@ function CampoFormazione({ basso, alto, colorePerSquadra, selezionato, onClickGi
   );
 }
 
-const NOMI_RUOLO = { POR: "Portiere", DIF: "Difensore", CEN: "Centrocampista", ATT: "Attaccante" };
-
 function SuggerisciFormazione({ prenotazioni, titolariIds, squadre, colorePerSquadra }) {
   const [aperto, setAperto] = useState(false);
   const [moduloBasso, setModuloBasso] = useState("3-2-1");
@@ -1327,24 +1330,41 @@ function SuggerisciFormazione({ prenotazioni, titolariIds, squadre, colorePerSqu
   };
 
   const clickGiocatore = (squadraKey, ruolo, giocatoreId) => {
-    // stesso giocatore ricliccato -> deseleziona
-    if (selezionato && selezionato.squadraKey === squadraKey && selezionato.giocatoreId === giocatoreId) {
+    // nessuna selezione attiva -> seleziona questo giocatore
+    if (!selezionato) {
+      setSelezionato({ squadraKey, ruolo, giocatoreId });
+      return;
+    }
+    // riclicco lo stesso giocatore -> deseleziona
+    if (selezionato.squadraKey === squadraKey && selezionato.giocatoreId === giocatoreId) {
       setSelezionato(null);
       return;
     }
-    setSelezionato({ squadraKey, ruolo, giocatoreId });
-  };
-
-  const spostaInRuolo = (nuovoRuolo) => {
-    if (!selezionato || selezionato.ruolo === nuovoRuolo) { setSelezionato(null); return; }
-    const setter = selezionato.squadraKey === "basso" ? setFormazioneBasso : setFormazioneAlto;
+    // clic su un giocatore di un'altra squadra -> semplicemente cambio la selezione (non si scambiano tra squadre diverse)
+    if (selezionato.squadraKey !== squadraKey) {
+      setSelezionato({ squadraKey, ruolo, giocatoreId });
+      return;
+    }
+    // stessa squadra, giocatore diverso -> scambio i due (il modulo resta intatto)
+    const setter = squadraKey === "basso" ? setFormazioneBasso : setFormazioneAlto;
+    const ruoloA = selezionato.ruolo, idA = selezionato.giocatoreId;
+    const ruoloB = ruolo, idB = giocatoreId;
     setter((prev) => {
-      const g = prev[selezionato.ruolo].find((x) => x.id === selezionato.giocatoreId);
-      if (!g) return prev;
+      if (ruoloA === ruoloB) {
+        const arr = [...prev[ruoloA]];
+        const ia = arr.findIndex((x) => x.id === idA);
+        const ib = arr.findIndex((x) => x.id === idB);
+        if (ia === -1 || ib === -1) return prev;
+        [arr[ia], arr[ib]] = [arr[ib], arr[ia]];
+        return { ...prev, [ruoloA]: arr };
+      }
+      const gA = prev[ruoloA].find((x) => x.id === idA);
+      const gB = prev[ruoloB].find((x) => x.id === idB);
+      if (!gA || !gB) return prev;
       return {
         ...prev,
-        [selezionato.ruolo]: prev[selezionato.ruolo].filter((x) => x.id !== selezionato.giocatoreId),
-        [nuovoRuolo]: [...prev[nuovoRuolo], g],
+        [ruoloA]: prev[ruoloA].map((x) => (x.id === idA ? gB : x)),
+        [ruoloB]: prev[ruoloB].map((x) => (x.id === idB ? gA : x)),
       };
     });
     setSelezionato(null);
@@ -1396,17 +1416,12 @@ function SuggerisciFormazione({ prenotazioni, titolariIds, squadre, colorePerSqu
           />
 
           {selezionato ? (
-            <div style={{ display: "flex", gap: 6, marginTop: 10, justifyContent: "center" }}>
-              <span style={{ fontSize: 11, color: C.mutedFaint, alignSelf: "center" }}>Sposta in:</span>
-              {Object.keys(NOMI_RUOLO).filter((r) => r !== selezionato.ruolo).map((r) => (
-                <button key={r} onClick={() => spostaInRuolo(r)} className="disp" style={{ padding: "6px 10px", borderRadius: 6, border: `1px solid ${C.line}`, cursor: "pointer", background: C.surface2, color: C.chalk, fontSize: 11 }}>
-                  {r}
-                </button>
-              ))}
+            <div style={{ fontSize: 11, color: C.flood, marginTop: 10, textAlign: "center" }}>
+              Ora tocca un altro giocatore della stessa squadra per scambiarli — oppure riclicca su di lui per annullare.
             </div>
           ) : (
             <div style={{ fontSize: 11, color: C.mutedFaint, marginTop: 8, textAlign: "center" }}>
-              Tocca un giocatore per spostarlo in un altro ruolo.
+              Tocca un giocatore, poi un secondo per scambiarli di ruolo.
             </div>
           )}
 
