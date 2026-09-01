@@ -172,7 +172,7 @@ export default function App() {
       }
       let voti = [];
       if (storicoData.length > 0) {
-        voti = await sb(`voti_mvp?select=*,giocatori(*)&id_partita=in.(${storicoData.map((p) => p.id).join(",")})`);
+        voti = await sb(`voti_mvp?select=*,giocatori!id_giocatore(*)&id_partita=in.(${storicoData.map((p) => p.id).join(",")})`);
       }
       setSquadre(sq);
       setGiocatori(gio);
