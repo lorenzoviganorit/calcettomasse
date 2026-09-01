@@ -918,8 +918,8 @@ function ColonnePerSquadra({ squadre, colorePerSquadra, prenotazioni, titolariId
 }
 
 const LOGO_SQUADRA = {
-  "Zincadoria": "/logos/zincadoria.png",
-  "QT8": "/logos/qt8.png",
+  "Real Madunin": "/logos/real-madunin.jpg",
+  "Barcellotto": "/logos/barcellotto.jpg",
 };
 
 function StatsTab({ squadre, colorePerSquadra, storico, currentUser, busy, caricaDettaglioPartita, votaMvp }) {
