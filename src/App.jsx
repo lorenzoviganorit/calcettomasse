@@ -1375,7 +1375,7 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
         </div>
       </Collassabile>
 
-      <AnagraficaLista giocatori={giocatori} colorePerSquadra={colorePerSquadra} squadre={squadre} busy={busy} onSpostaSquadra={spostaSquadraGiocatore} />
+      <AnagraficaLista giocatori={giocatori} colorePerSquadra={colorePerSquadra} squadre={squadre} busy={busy} onSpostaSquadra={spostaSquadraGiocatore} actionError={actionError} />
 
       <NuovoGiocatoreForm squadre={squadre} busy={busy} onCrea={creaGiocatore} />
 
@@ -1386,10 +1386,13 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
   );
 }
 
-function AnagraficaLista({ giocatori, colorePerSquadra, squadre, busy, onSpostaSquadra }) {
+function AnagraficaLista({ giocatori, colorePerSquadra, squadre, busy, onSpostaSquadra, actionError }) {
   const ordinati = useMemo(() => [...giocatori].sort((a, b) => (a.soprannome || a.nome).localeCompare(b.soprannome || b.nome)), [giocatori]);
   return (
     <Collassabile titolo={`Anagrafica Giocatori (${ordinati.length})`} defaultAperto={false}>
+      {onSpostaSquadra && actionError && (
+        <div style={{ fontSize: 12, color: C.danger, marginBottom: 8 }}>Errore ({actionError}) — probabile policy mancante su "giocatori" (UPDATE).</div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {ordinati.map((g) => {
           const altraSquadra = squadre?.find((s) => s.id !== g.id_squadra);
