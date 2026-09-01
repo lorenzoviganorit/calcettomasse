@@ -1181,7 +1181,12 @@ function NuovoGiocatoreForm({ squadre, busy, onCrea }) {
 // (manca un attaccante -> prendi un centrocampista; manca un centrocampista
 // -> prendi un difensore; manca il portiere -> prendi un difensore)
 // ------------------------------------------------------------------
-function assegnaFormazione(giocatoriSquadra) {
+const MODULI = {
+  "3-2-1": { POR: 1, DIF: 3, CEN: 2, ATT: 1 },
+  "2-3-1": { POR: 1, DIF: 2, CEN: 3, ATT: 1 },
+};
+
+function assegnaFormazione(giocatoriSquadra, target = MODULI["3-2-1"]) {
   const pool = [...giocatoriSquadra];
   const prendi = (ruolo) => {
     const idx = pool.findIndex((g) => g.ruolo === ruolo);
@@ -1190,7 +1195,6 @@ function assegnaFormazione(giocatoriSquadra) {
   };
 
   const ass = { POR: [], DIF: [], CEN: [], ATT: [] };
-  const target = { POR: 1, DIF: 3, CEN: 2, ATT: 1 };
 
   Object.entries(target).forEach(([ruolo, n]) => {
     for (let i = 0; i < n; i++) {
@@ -1217,21 +1221,29 @@ function distribuisciX(n, centro = 190, ampiezza = 110) {
   return Array.from({ length: n }, (_, i) => centro - ampiezza + i * step);
 }
 
-function CampoFormazione({ basso, alto, colorePerSquadra }) {
+function CampoFormazione({ basso, alto, colorePerSquadra, selezionato, onClickGiocatore }) {
   const W = 380, H = 560;
   const yBasso = { POR: 522, DIF: 424, CEN: 322, ATT: 226 };
   const yAlto = { POR: 38, DIF: 136, CEN: 238, ATT: 334 };
   const etichetta = { POR: "P", DIF: "D", CEN: "CEN", ATT: "ATT" };
 
-  const renderRuolo = (arr, y, colore, idSquadra) => {
+  const renderRuolo = (arr, ruolo, y, colore, squadraKey, idSquadra) => {
     const xs = distribuisciX(arr.length);
-    return arr.map((g, i) => (
-      <g key={`${idSquadra}-${g.id}`} transform={`translate(${xs[i]},${y})`}>
-        <circle r="17" fill={colore} stroke="#0E1F17" strokeWidth="2" />
-        <text textAnchor="middle" dy="5" fontSize="13" fontWeight="700" fill="#0E1F17" fontFamily="'Oswald', sans-serif">{g.numero_maglia ?? "-"}</text>
-        <text textAnchor="middle" y="31" fontSize="10.5" fill="#F3F1E7" fontFamily="'Work Sans', sans-serif">{g.soprannome || g.nome}</text>
-      </g>
-    ));
+    return arr.map((g, i) => {
+      const isSelezionato = selezionato && selezionato.squadraKey === squadraKey && selezionato.giocatoreId === g.id;
+      return (
+        <g
+          key={`${idSquadra}-${g.id}`}
+          transform={`translate(${xs[i]},${y})`}
+          onClick={() => onClickGiocatore(squadraKey, ruolo, g.id)}
+          style={{ cursor: "pointer" }}
+        >
+          <circle r="17" fill={colore} stroke={isSelezionato ? "#F3F1E7" : "#0E1F17"} strokeWidth={isSelezionato ? 3 : 2} />
+          <text textAnchor="middle" dy="5" fontSize="13" fontWeight="700" fill="#0E1F17" fontFamily="'Oswald', sans-serif">{g.numero_maglia ?? "-"}</text>
+          <text textAnchor="middle" y="31" fontSize="10.5" fill="#F3F1E7" fontFamily="'Work Sans', sans-serif">{g.soprannome || g.nome}</text>
+        </g>
+      );
+    });
   };
 
   const renderEtichette = (y, allineaDx) => (
@@ -1262,46 +1274,144 @@ function CampoFormazione({ basso, alto, colorePerSquadra }) {
       {renderEtichette(yBasso, false)}
       {renderEtichette(yAlto, true)}
 
-      {renderRuolo(basso.ass.POR, yBasso.POR, colorePerSquadra[basso.id], basso.id)}
-      {renderRuolo(basso.ass.DIF, yBasso.DIF, colorePerSquadra[basso.id], basso.id)}
-      {renderRuolo(basso.ass.CEN, yBasso.CEN, colorePerSquadra[basso.id], basso.id)}
-      {renderRuolo(basso.ass.ATT, yBasso.ATT, colorePerSquadra[basso.id], basso.id)}
+      {renderRuolo(basso.ass.POR, "POR", yBasso.POR, colorePerSquadra[basso.id], "basso", basso.id)}
+      {renderRuolo(basso.ass.DIF, "DIF", yBasso.DIF, colorePerSquadra[basso.id], "basso", basso.id)}
+      {renderRuolo(basso.ass.CEN, "CEN", yBasso.CEN, colorePerSquadra[basso.id], "basso", basso.id)}
+      {renderRuolo(basso.ass.ATT, "ATT", yBasso.ATT, colorePerSquadra[basso.id], "basso", basso.id)}
 
-      {renderRuolo(alto.ass.POR, yAlto.POR, colorePerSquadra[alto.id], alto.id)}
-      {renderRuolo(alto.ass.DIF, yAlto.DIF, colorePerSquadra[alto.id], alto.id)}
-      {renderRuolo(alto.ass.CEN, yAlto.CEN, colorePerSquadra[alto.id], alto.id)}
-      {renderRuolo(alto.ass.ATT, yAlto.ATT, colorePerSquadra[alto.id], alto.id)}
+      {renderRuolo(alto.ass.POR, "POR", yAlto.POR, colorePerSquadra[alto.id], "alto", alto.id)}
+      {renderRuolo(alto.ass.DIF, "DIF", yAlto.DIF, colorePerSquadra[alto.id], "alto", alto.id)}
+      {renderRuolo(alto.ass.CEN, "CEN", yAlto.CEN, colorePerSquadra[alto.id], "alto", alto.id)}
+      {renderRuolo(alto.ass.ATT, "ATT", yAlto.ATT, colorePerSquadra[alto.id], "alto", alto.id)}
     </svg>
   );
 }
 
+const NOMI_RUOLO = { POR: "Portiere", DIF: "Difensore", CEN: "Centrocampista", ATT: "Attaccante" };
+
 function SuggerisciFormazione({ prenotazioni, titolariIds, squadre, colorePerSquadra }) {
   const [aperto, setAperto] = useState(false);
+  const [moduloBasso, setModuloBasso] = useState("3-2-1");
+  const [moduloAlto, setModuloAlto] = useState("3-2-1");
+  const [formazioneBasso, setFormazioneBasso] = useState(null);
+  const [formazioneAlto, setFormazioneAlto] = useState(null);
+  const [selezionato, setSelezionato] = useState(null); // { squadraKey, ruolo, giocatoreId }
 
   const mappaGiocatore = (p) => p.giocatori
     ? { id: p.giocatori.id, nome: p.giocatori.nome, soprannome: p.giocatori.soprannome, ruolo: p.giocatori.ruolo, numero_maglia: p.giocatori.numero_maglia }
     : { id: `ospite-${p.id}`, nome: p.nome_ospite, soprannome: p.nome_ospite, ruolo: null, numero_maglia: null };
 
-  const datiSquadra = (sq) => {
-    const titolari = prenotazioni.filter((p) => p.id_squadra === sq.id && titolariIds.has(p.id)).map(mappaGiocatore);
-    return { id: sq.id, nome: sq.nome, ass: assegnaFormazione(titolari) };
+  const titolariDi = (sq) => prenotazioni.filter((p) => p.id_squadra === sq.id && titolariIds.has(p.id)).map(mappaGiocatore);
+
+  const rigenera = (modulo) => {
+    if (squadre.length !== 2) return;
+    setFormazioneBasso(assegnaFormazione(titolariDi(squadre[0]), MODULI[moduloBasso]));
+    setFormazioneAlto(assegnaFormazione(titolariDi(squadre[1]), MODULI[moduloAlto]));
   };
+
+  const apri = () => {
+    if (!aperto) rigenera();
+    setAperto((v) => !v);
+    setSelezionato(null);
+  };
+
+  const cambiaModulo = (squadraKey, modulo) => {
+    if (squadraKey === "basso") {
+      setModuloBasso(modulo);
+      setFormazioneBasso(assegnaFormazione(titolariDi(squadre[0]), MODULI[modulo]));
+    } else {
+      setModuloAlto(modulo);
+      setFormazioneAlto(assegnaFormazione(titolariDi(squadre[1]), MODULI[modulo]));
+    }
+    setSelezionato(null);
+  };
+
+  const clickGiocatore = (squadraKey, ruolo, giocatoreId) => {
+    // stesso giocatore ricliccato -> deseleziona
+    if (selezionato && selezionato.squadraKey === squadraKey && selezionato.giocatoreId === giocatoreId) {
+      setSelezionato(null);
+      return;
+    }
+    setSelezionato({ squadraKey, ruolo, giocatoreId });
+  };
+
+  const spostaInRuolo = (nuovoRuolo) => {
+    if (!selezionato || selezionato.ruolo === nuovoRuolo) { setSelezionato(null); return; }
+    const setter = selezionato.squadraKey === "basso" ? setFormazioneBasso : setFormazioneAlto;
+    setter((prev) => {
+      const g = prev[selezionato.ruolo].find((x) => x.id === selezionato.giocatoreId);
+      if (!g) return prev;
+      return {
+        ...prev,
+        [selezionato.ruolo]: prev[selezionato.ruolo].filter((x) => x.id !== selezionato.giocatoreId),
+        [nuovoRuolo]: [...prev[nuovoRuolo], g],
+      };
+    });
+    setSelezionato(null);
+  };
+
+  const ModuloSelettore = ({ squadraKey, modulo }) => (
+    <div style={{ display: "flex", gap: 4 }}>
+      {Object.keys(MODULI).map((m) => (
+        <button
+          key={m} onClick={() => cambiaModulo(squadraKey, m)} className="disp"
+          style={{
+            padding: "4px 8px", borderRadius: 6, fontSize: 10, cursor: "pointer",
+            border: `1px solid ${modulo === m ? C.flood : C.line}`,
+            background: modulo === m ? C.surface2 : "transparent",
+            color: modulo === m ? C.flood : C.mutedFaint,
+          }}
+        >
+          {m}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <div>
-      <button onClick={() => setAperto((v) => !v)} style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "none", cursor: "pointer", background: C.surface2, color: C.chalk, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} className="disp">
+      <button onClick={apri} style={{ width: "100%", padding: "14px 0", borderRadius: 12, border: "none", cursor: "pointer", background: C.surface2, color: C.chalk, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} className="disp">
         <ShieldCheck size={18} /> {aperto ? "Nascondi formazione" : "Suggerisci formazione"}
       </button>
 
-      {aperto && squadre.length === 2 && (
+      {aperto && squadre.length === 2 && formazioneBasso && formazioneAlto && (
         <div style={{ marginTop: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "0 4px 6px" }}>
-            <span className="disp" style={{ fontSize: 12, color: colorePerSquadra[squadre[1].id] }}>{squadre[1].nome}</span>
-            <span className="disp" style={{ fontSize: 12, color: colorePerSquadra[squadre[0].id] }}>{squadre[0].nome}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 4px 6px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="disp" style={{ fontSize: 12, color: colorePerSquadra[squadre[1].id] }}>{squadre[1].nome}</span>
+              <ModuloSelettore squadraKey="alto" modulo={moduloAlto} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+              <span className="disp" style={{ fontSize: 12, color: colorePerSquadra[squadre[0].id] }}>{squadre[0].nome}</span>
+              <ModuloSelettore squadraKey="basso" modulo={moduloBasso} />
+            </div>
           </div>
-          <CampoFormazione basso={datiSquadra(squadre[0])} alto={datiSquadra(squadre[1])} colorePerSquadra={colorePerSquadra} />
+
+          <CampoFormazione
+            basso={{ id: squadre[0].id, ass: formazioneBasso }}
+            alto={{ id: squadre[1].id, ass: formazioneAlto }}
+            colorePerSquadra={colorePerSquadra}
+            selezionato={selezionato}
+            onClickGiocatore={clickGiocatore}
+          />
+
+          {selezionato ? (
+            <div style={{ display: "flex", gap: 6, marginTop: 10, justifyContent: "center" }}>
+              <span style={{ fontSize: 11, color: C.mutedFaint, alignSelf: "center" }}>Sposta in:</span>
+              {Object.keys(NOMI_RUOLO).filter((r) => r !== selezionato.ruolo).map((r) => (
+                <button key={r} onClick={() => spostaInRuolo(r)} className="disp" style={{ padding: "6px 10px", borderRadius: 6, border: `1px solid ${C.line}`, cursor: "pointer", background: C.surface2, color: C.chalk, fontSize: 11 }}>
+                  {r}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: C.mutedFaint, marginTop: 8, textAlign: "center" }}>
+              Tocca un giocatore per spostarlo in un altro ruolo.
+            </div>
+          )}
+
           <div style={{ fontSize: 11, color: C.mutedFaint, marginTop: 8 }}>
-            Proposta automatica in base ai ruoli dichiarati — se manca un ruolo, viene ripiegato sul più vicino (attaccante → centrocampista → difensore; portiere → difensore). Gli ospiti (senza ruolo dichiarato) riempiono gli ultimi posti liberi.
+            Proposta automatica in base ai ruoli dichiarati — se manca un ruolo, viene ripiegato sul più vicino (attaccante → centrocampista → difensore; portiere → difensore). Gli ospiti (senza ruolo dichiarato) riempiono gli ultimi posti liberi. Cambiare modulo rigenera la proposta per quella squadra.
           </div>
         </div>
       )}
