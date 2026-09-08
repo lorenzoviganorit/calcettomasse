@@ -959,12 +959,15 @@ function StatsTab({ squadre, colorePerSquadra, storico, currentUser, busy, votiS
 
   const vittorie = useMemo(() => {
     const conteggio = {};
+    let pareggi = 0;
     squadre.forEach((s) => (conteggio[s.id] = 0));
     storico.forEach((p) => {
       if (p.gol_squadra_1 == null || p.gol_squadra_2 == null) return;
       if (p.gol_squadra_1 > p.gol_squadra_2) conteggio[p.id_squadra_1] = (conteggio[p.id_squadra_1] || 0) + 1;
       else if (p.gol_squadra_2 > p.gol_squadra_1) conteggio[p.id_squadra_2] = (conteggio[p.id_squadra_2] || 0) + 1;
+      else pareggi += 1;
     });
+    conteggio.pareggi = pareggi;
     return conteggio;
   }, [storico, squadre]);
 
@@ -996,17 +999,34 @@ function StatsTab({ squadre, colorePerSquadra, storico, currentUser, busy, votiS
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       <div style={{ background: C.surface, borderRadius: 14, padding: "20px 16px", border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "space-around" }}>
-        {squadre.map((sq) => (
-          <div key={sq.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-            {LOGO_SQUADRA[sq.nome] ? (
-              <img src={LOGO_SQUADRA[sq.nome]} alt={sq.nome} style={{ width: 56, height: 56, objectFit: "contain" }} />
+        {squadre[0] && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+            {LOGO_SQUADRA[squadre[0].nome] ? (
+              <img src={LOGO_SQUADRA[squadre[0].nome]} alt={squadre[0].nome} style={{ width: 56, height: 56, objectFit: "contain" }} />
             ) : (
-              <div style={{ width: 56, height: 56, borderRadius: "50%", background: colorePerSquadra[sq.id] }} />
+              <div style={{ width: 56, height: 56, borderRadius: "50%", background: colorePerSquadra[squadre[0].id] }} />
             )}
-            <div className="num" style={{ fontSize: 32, lineHeight: 1 }}>{vittorie[sq.id] || 0}</div>
-            <div className="disp" style={{ fontSize: 11, color: colorePerSquadra[sq.id] }}>{sq.nome}</div>
+            <div className="num" style={{ fontSize: 32, lineHeight: 1 }}>{vittorie[squadre[0].id] || 0}</div>
+            <div className="disp" style={{ fontSize: 11, color: colorePerSquadra[squadre[0].id] }}>{squadre[0].nome}</div>
           </div>
-        ))}
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+          <div className="disp" style={{ fontSize: 9, color: C.mutedFaint, letterSpacing: "0.08em" }}>PAREGGI</div>
+          <div className="num" style={{ fontSize: 20, color: C.muted }}>{vittorie.pareggi || 0}</div>
+        </div>
+
+        {squadre[1] && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+            {LOGO_SQUADRA[squadre[1].nome] ? (
+              <img src={LOGO_SQUADRA[squadre[1].nome]} alt={squadre[1].nome} style={{ width: 56, height: 56, objectFit: "contain" }} />
+            ) : (
+              <div style={{ width: 56, height: 56, borderRadius: "50%", background: colorePerSquadra[squadre[1].id] }} />
+            )}
+            <div className="num" style={{ fontSize: 32, lineHeight: 1 }}>{vittorie[squadre[1].id] || 0}</div>
+            <div className="disp" style={{ fontSize: 11, color: colorePerSquadra[squadre[1].id] }}>{squadre[1].nome}</div>
+          </div>
+        )}
       </div>
 
       <div>
