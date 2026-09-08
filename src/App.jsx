@@ -822,7 +822,14 @@ function prossimiLunedi(dataPartitaStr, count = 8) {
   }
   return out;
 }
-const toISODate = (d) => d.toISOString().slice(0, 10);
+// Formatta in YYYY-MM-DD restando nel fuso orario locale — .toISOString() convertirebbe
+// in UTC e con l'Italia avanti di 1-2 ore farebbe scivolare la data al giorno prima.
+const toISODate = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
 
 function ChiudiPartita({ busy, squadre, colorePerSquadra, partita, onChiudi }) {
   const [open, setOpen] = useState(false);
