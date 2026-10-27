@@ -316,6 +316,13 @@ export default function App() {
       });
     });
 
+  // Partita saltata (es. non si trovano 14 giocatori): resta a storico come "annullata", fuori dalle statistiche
+  const annullaPartita = (nuovaData) =>
+    withBusy(async () => {
+      await sbWrite(`partite?id=eq.${partita.id}`, "PATCH", { stato: "annullata" });
+      await sbWrite("partite", "POST", { data_partita: nuovaData, stato: "aperta" });
+    });
+
   // Titolari di una partita passata + eventuale voto MVP già espresso da chi è loggato
   const caricaDettaglioPartita = useCallback(async (idPartita) => {
     const righe = await sb(`giocatori_partite?select=*,giocatori(*)&id_partita=eq.${idPartita}&flag_annullamento=eq.false&order=data_prenotazione.asc`);
@@ -443,6 +450,7 @@ export default function App() {
                   currentUser={currentUser} busy={busy} actionError={actionError} toggleBooking={toggleBooking}
                   portaOspite={portaOspite} giocatori={giocatori} aggiungiPresenza={aggiungiPresenza}
                   chiudiPartita={chiudiPartita}
+                  annullaPartita={annullaPartita}
                 />
               )}
               {tab === "stats" && (
@@ -729,7 +737,7 @@ function Scoreboard({ squadre, colorePerSquadra, contaTitolari }) {
   );
 }
 
-function HomeTab({ squadre, colorePerSquadra, prenotazioni, titolariIds, contaTitolari, partita, currentUser, busy, actionError, toggleBooking, portaOspite, giocatori, aggiungiPresenza, chiudiPartita }) {
+function HomeTab({ squadre, colorePerSquadra, prenotazioni, titolariIds, contaTitolari, partita, currentUser, busy, actionError, toggleBooking, portaOspite, giocatori, aggiungiPresenza, chiudiPartita, annullaPartita }) {
   const [panel, setPanel] = useState(null); // null | 'ospite' | 'compagno'
 
   if (!partita) {
@@ -774,7 +782,7 @@ function HomeTab({ squadre, colorePerSquadra, prenotazioni, titolariIds, contaTi
       </div>
 
       {currentUser.is_admin && (
-        <ChiudiPartita busy={busy} squadre={squadre} colorePerSquadra={colorePerSquadra} partita={partita} onChiudi={chiudiPartita} />
+        <ChiudiPartita busy={busy} squadre={squadre} colorePerSquadra={colorePerSquadra} partita={partita} onChiudi={chiudiPartita} onAnnulla={annullaPartita} />
       )}
     </div>
   );
@@ -831,8 +839,10 @@ const toISODate = (d) => {
   return `${y}-${m}-${day}`;
 };
 
-function ChiudiPartita({ busy, squadre, colorePerSquadra, partita, onChiudi }) {
-  const [open, setOpen] = useState(false);
+function ChiudiPartita({ busy, squadre, colorePerSquadra, partita, onChiudi, onAnnulla }) {
+  const [modo, setModo] = useState(null); // null | "risultato" | "annulla"
+  const open = modo === "risultato";
+  const setOpen = (v) => setModo(v ? "risultato" : null);
   const [gol1, setGol1] = useState("");
   const [gol2, setGol2] = useState("");
   const opzioniData = useMemo(() => prossimiLunedi(partita.data_partita), [partita.data_partita]);
@@ -847,11 +857,37 @@ function ChiudiPartita({ busy, squadre, colorePerSquadra, partita, onChiudi }) {
     setOpen(false);
   };
 
-  if (!open) {
+  if (modo === null) {
     return (
-      <button onClick={() => setOpen(true)} className="disp" style={{ padding: "13px 0", borderRadius: 10, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted }}>
-        Chiudi partita e inserisci risultato
-      </button>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={() => setModo("risultato")} className="disp" style={{ flex: 1, padding: "13px 0", borderRadius: 10, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted }}>
+          Chiudi partita e inserisci risultato
+        </button>
+        <button onClick={() => setModo("annulla")} className="disp" style={{ padding: "13px 16px", borderRadius: 10, border: `1px solid ${C.danger}`, cursor: "pointer", background: "transparent", color: C.danger }}>
+          Partita annullata
+        </button>
+      </div>
+    );
+  }
+
+  if (modo === "annulla") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, background: C.surface, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14 }}>
+        <div className="disp" style={{ fontSize: 13, color: C.mutedFaint }}>Annulla la partita</div>
+        <div style={{ fontSize: 12, color: C.mutedFaint }}>La partita resta a storico come annullata, senza risultato e fuori dalle statistiche.</div>
+        <label style={labelStyle}>Prossima partita</label>
+        <select value={prossimaData} onChange={(e) => setProssimaData(e.target.value)} style={{ ...inputStyle, marginTop: -6 }}>
+          {opzioniData.map((d) => (
+            <option key={toISODate(d)} value={toISODate(d)}>
+              {d.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })}
+            </option>
+          ))}
+        </select>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button disabled={busy} onClick={async () => { await onAnnulla(prossimaData); setModo(null); }} className="disp" style={{ flex: 1, padding: "12px 0", borderRadius: 8, border: "none", cursor: "pointer", background: C.danger, color: "#fff", opacity: busy ? 0.6 : 1 }}>Conferma annullamento</button>
+          <button type="button" onClick={() => setModo(null)} className="disp" style={{ padding: "12px 16px", borderRadius: 8, border: `1px solid ${C.line}`, cursor: "pointer", background: "transparent", color: C.muted }}>Indietro</button>
+        </div>
+      </div>
     );
   }
 
