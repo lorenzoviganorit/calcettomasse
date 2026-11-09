@@ -228,34 +228,44 @@ export default function App() {
     }
   };
 
+  // Prenota un giocatore vero. Se ha già una riga per questa partita (es. ha disdetto e si ripresenta)
+  // la riattiva invece di inserirne una nuova: UNIQUE(id_giocatore, id_partita) darebbe errore 409.
+  // La data di prenotazione si aggiorna: chi rientra riparte in fondo alla coda.
+  const prenota = async (idGiocatore, idSquadra) => {
+    const esistenti = await sb(`giocatori_partite?select=id&id_partita=eq.${partita.id}&id_giocatore=eq.${idGiocatore}`);
+    const adesso = new Date().toISOString();
+    if (esistenti.length > 0) {
+      await sbWrite(`giocatori_partite?id=eq.${esistenti[0].id}`, "PATCH", {
+        flag_annullamento: false,
+        data_prenotazione: adesso,
+        id_squadra: idSquadra,
+      });
+    } else {
+      await sbWrite("giocatori_partite", "POST", {
+        id_giocatore: idGiocatore,
+        id_partita: partita.id,
+        id_squadra: idSquadra,
+        data_prenotazione: adesso,
+        flag_annullamento: false,
+        stato: "riserva",
+      });
+    }
+  };
+
   const toggleBooking = () =>
     withBusy(async () => {
       const mine = prenotazioni.find((p) => p.id_giocatore === currentUser.id);
       if (mine) {
         await sbWrite(`giocatori_partite?id=eq.${mine.id}`, "PATCH", { flag_annullamento: true });
       } else {
-        await sbWrite("giocatori_partite", "POST", {
-          id_giocatore: currentUser.id,
-          id_partita: partita.id,
-          id_squadra: currentUser.id_squadra,
-          data_prenotazione: new Date().toISOString(),
-          flag_annullamento: false,
-          stato: "riserva",
-        });
+        await prenota(currentUser.id, currentUser.id_squadra);
       }
     });
 
   const aggiungiPresenza = (giocatoreId) =>
     withBusy(async () => {
       const g = giocatori.find((x) => x.id === giocatoreId);
-      await sbWrite("giocatori_partite", "POST", {
-        id_giocatore: giocatoreId,
-        id_partita: partita.id,
-        id_squadra: g.id_squadra,
-        data_prenotazione: new Date().toISOString(),
-        flag_annullamento: false,
-        stato: "riserva",
-      });
+      await prenota(giocatoreId, g.id_squadra);
     });
 
   const rimuoviPresenza = (prenotazioneId) =>
