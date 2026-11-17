@@ -475,7 +475,7 @@ export default function App() {
                   giocatori={giocatori} squadre={squadre} colorePerSquadra={colorePerSquadra}
                   prenotazioni={prenotazioni} titolariIds={titolariIds} partita={partita}
                   currentUser={currentUser} busy={busy} actionError={actionError}
-                  rimuoviPresenza={rimuoviPresenza} spostaSquadra={spostaSquadra}
+                  rimuoviPresenza={rimuoviPresenza} aggiungiPresenza={aggiungiPresenza} spostaSquadra={spostaSquadra}
                   creaGiocatore={creaGiocatore} spostaSquadraGiocatore={spostaSquadraGiocatore}
                 />
               )}
@@ -1554,7 +1554,98 @@ function SuggerisciFormazione({ prenotazioni, titolariIds, squadre, colorePerSqu
   );
 }
 
-function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolariIds, partita, currentUser, busy, actionError, rimuoviPresenza, spostaSquadra, creaGiocatore, spostaSquadraGiocatore }) {
+// Griglia di tile per segnare in un colpo solo chi si è iscritto (es. da WhatsApp).
+// Si tocca un tile per segnare/togliere la presenza. L'ordine dei tocchi è l'ordine di prenotazione,
+// quindi tocca i nomi nell'ordine in cui si sono iscritti: i primi 14 saranno titolari.
+function SegnaPresenti({ giocatori, squadre, colorePerSquadra, prenotazioni, titolariIds, aggiungiPresenza, rimuoviPresenza }) {
+  const [ricerca, setRicerca] = useState("");
+  const [inCorso, setInCorso] = useState(() => new Set());
+
+  const nome = (g) => g.soprannome || g.nome;
+  const rigaPerGiocatore = useMemo(() => {
+    const m = new Map();
+    prenotazioni.forEach((p, i) => { if (p.id_giocatore) m.set(p.id_giocatore, { riga: p, posizione: i + 1 }); });
+    return m;
+  }, [prenotazioni]);
+  const ospiti = prenotazioni.filter((p) => !p.id_giocatore);
+
+  const tocca = async (g) => {
+    if (inCorso.has(g.id)) return;
+    setInCorso((s) => new Set(s).add(g.id));
+    const presente = rigaPerGiocatore.get(g.id);
+    try {
+      if (presente) await rimuoviPresenza(presente.riga.id);
+      else await aggiungiPresenza(g.id);
+    } finally {
+      setInCorso((s) => { const n = new Set(s); n.delete(g.id); return n; });
+    }
+  };
+
+  const q = ricerca.trim().toLowerCase();
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: 12, color: C.mutedFaint }}>Tocca i giocatori nell'ordine di iscrizione</span>
+        <span className="disp" style={{ fontSize: 12, color: titolariIds.size >= 14 ? C.flood : C.muted }}>{prenotazioni.length} iscritti · {titolariIds.size}/14 titolari</span>
+      </div>
+      <input placeholder="Cerca giocatore…" value={ricerca} onChange={(e) => setRicerca(e.target.value)} style={inputStyle} />
+
+      {squadre.map((sq) => {
+        const lista = giocatori
+          .filter((g) => g.id_squadra === sq.id)
+          .filter((g) => !q || `${g.soprannome || ""} ${g.nome}`.toLowerCase().includes(q))
+          .sort((a, b) => nome(a).localeCompare(nome(b), "it"));
+        const colore = colorePerSquadra[sq.id];
+        return (
+          <div key={sq.id}>
+            <div className="disp" style={{ fontSize: 11, color: colore, marginBottom: 6 }}>{sq.nome}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))", gap: 8 }}>
+              {lista.map((g) => {
+                const presente = rigaPerGiocatore.get(g.id);
+                const titolare = presente && titolariIds.has(presente.riga.id);
+                const attesa = inCorso.has(g.id);
+                return (
+                  <button
+                    key={g.id}
+                    onClick={() => tocca(g)}
+                    aria-pressed={!!presente}
+                    style={{
+                      position: "relative", textAlign: "left", padding: "10px 10px", borderRadius: 10, cursor: "pointer",
+                      border: presente ? `2px solid ${colore}` : `1px solid ${C.line}`,
+                      background: presente ? C.surface2 : "transparent",
+                      color: presente ? C.chalk : C.muted, opacity: attesa ? 0.5 : 1, minWidth: 0,
+                    }}
+                  >
+                    <div style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", paddingRight: presente ? 22 : 0 }}>{nome(g)}</div>
+                    <div style={{ fontSize: 10, color: C.mutedFaint, marginTop: 2 }}>
+                      {g.numero_maglia != null ? `#${g.numero_maglia} · ` : ""}{g.ruolo}
+                    </div>
+                    {presente && (
+                      <>
+                        <span className="num" style={{ position: "absolute", top: 6, right: 8, fontSize: 11, color: colore }}>{presente.posizione}</span>
+                        <span className="disp" style={{ position: "absolute", bottom: 6, right: 8, fontSize: 9, color: titolare ? C.flood : C.mutedFaint }}>{titolare ? "TIT" : "RIS"}</span>
+                      </>
+                    )}
+                  </button>
+                );
+              })}
+              {lista.length === 0 && <div style={{ fontSize: 12, color: C.mutedFaint }}>Nessun giocatore.</div>}
+            </div>
+          </div>
+        );
+      })}
+
+      {ospiti.length > 0 && (
+        <div style={{ fontSize: 11, color: C.mutedFaint }}>
+          Ospiti già inseriti: {ospiti.map((o) => o.nome_ospite).join(", ")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolariIds, partita, currentUser, busy, actionError, rimuoviPresenza, aggiungiPresenza, spostaSquadra, creaGiocatore, spostaSquadraGiocatore }) {
   const titolari = prenotazioni.filter((p) => titolariIds.has(p.id));
   const riserve = prenotazioni.filter((p) => !titolariIds.has(p.id));
 
@@ -1573,6 +1664,10 @@ function AdminTab({ giocatori, squadre, colorePerSquadra, prenotazioni, titolari
 
       <Collassabile titolo="Gestisci Prossima Partita">
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Collassabile titolo="Segna presenti">
+            <SegnaPresenti giocatori={giocatori} squadre={squadre} colorePerSquadra={colorePerSquadra} prenotazioni={prenotazioni} titolariIds={titolariIds} aggiungiPresenza={aggiungiPresenza} rimuoviPresenza={rimuoviPresenza} />
+          </Collassabile>
+
           <SuggerisciFormazione prenotazioni={prenotazioni} titolariIds={titolariIds} squadre={squadre} colorePerSquadra={colorePerSquadra} />
 
           <Collassabile titolo={`Titolari (${titolari.length}/14)`}>
